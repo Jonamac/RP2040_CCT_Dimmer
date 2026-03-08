@@ -57,3 +57,35 @@ The firmware targets a custom PCB built around:
 ## 📌 Notes
 This README is temporary and will be replaced with full documentation once the 
 core system is stable.
+
+## 🗺️ Roadmap
+
+### Phase 1 — Foundation Cleanup (in progress)
+- Stabilize NORMAL, DUMB, STANDBY, and DEMO transitions  
+- Fix fade timing inconsistencies  
+- Remove legacy OVERRIDE/OVERRIDE+ behavior  
+- Normalize brightness and CCT mapping across modes  
+
+### Phase 2 — FREQ Mode (up next)
+- Replace OVERRIDE with new FREQ mode  
+- Add frequency table (1–120 Hz + film rates)  
+- Implement strobe envelope on top of 25 kHz PWM  
+- Update display and button logic  
+
+### Phase 3 — CAL Mode
+- Replace OVERRIDE+ with CAL mode  
+- Add gamma toggle  
+- Add pot-freeze + step-mode (analyzer-style)  
+- Add raw ADC / raw PWM diagnostics  
+
+### Phase 4 — UI & UX Polish
+- Improve display layout  
+- Add temperature readout (future thermistor)  
+- Add optional fan control logic  
+- Add configuration constants to a dedicated header  
+
+### Phase 5 — Hardware Integration & Testing
+- Validate new PCB  
+- Verify pot linearity and ADC stability  
+- Validate fade curves and perceptual tuning  
+- Stress-test strobe engine at all frequencies  
