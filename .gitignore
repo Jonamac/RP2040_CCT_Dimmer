@@ -59,4 +59,5 @@
 *.log
 
 # Temporary files
+*.tmp/
 *.tmp
