@@ -1,3 +1,7 @@
+![Platform](https://img.shields.io/badge/platform-RP2040-blue)
+![Language](https://img.shields.io/badge/language-C++-brightgreen)
+![Status](https://img.shields.io/badge/status-in_development-orange)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
 # RP2040_CCT_Dimmer
 RP2040 ZERO CCT PWM Dimmer with display
 
