@@ -14,6 +14,11 @@ float effective_off_threshold_linear = 0.0010f; // Linear cutoff for OVERRIDE mo
 
 float gamma_val = 2.2f;
 
+float freqStrobeHz = 10.0f;          // default
+float freqDutyCycle = 0.5f;          // 50% on-time
+unsigned long freqCycleStartTime = 0;
+bool freqOnPhase = true;
+
 float calPresets[5] = {
   2700.0f,
   3800.0f,

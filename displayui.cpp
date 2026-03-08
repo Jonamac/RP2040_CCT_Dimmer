@@ -82,17 +82,27 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
     display.print(displayDutyPercent, 2);
     display.print("%");
 
+    // =====================
+    // FREQ MODE DISPLAY
+    // =====================
+    if (currentMode == MODE_FREQ) {
+        display.setCursor(0, 12);
+        display.print("FREQ ");
+        display.print(freqStrobeHz, 3);
+        display.print(" Hz");
+    }
+    else {
+        // Normal CCT line
+        display.setCursor(0, 12);
+        display.print("CCT ");
+        display.print((int)dispC);
+        display.print("K");
+    }
+
     if (currentWarmDuty == min_duty || currentCoolDuty == min_duty) {
         display.setCursor(100, 2);  //Match DUTY line heright
         display.print("mDUTY");
     }
-
-
-    // CCT line
-    display.setCursor(0, 12);
-    display.print("CCT ");
-    display.print((int)dispC);
-    display.print("K");
 
     // Main mode label (NORMAL, DUMB, DEMO, FREQ, CAL)
     if (modeLabel && strlen(modeLabel) > 0) {

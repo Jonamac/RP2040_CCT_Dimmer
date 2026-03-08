@@ -1,6 +1,9 @@
 #pragma once
 #include <Arduino.h>
 
+extern int lastCCTADC;
+extern int lastDutyADC;
+
 void readInputs(unsigned long now);
 void processButtons(unsigned long now);
 void processPots(unsigned long now);

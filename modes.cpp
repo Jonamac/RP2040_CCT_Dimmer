@@ -162,7 +162,12 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
             }
             return;
         }
-
+        
+        if (previousMode == MODE_FREQ) {
+            currentMode = MODE_FREQ;
+            freqCycleStartTime = 0;
+            return;
+        }
 
         // Return to NORMAL MODE
     if (previousMode == MODE_NORMAL) {
@@ -400,6 +405,21 @@ void handleMainLongPress() {
 
     // DUMB MODE: ignore long press
     if (currentMode == MODE_DUMB) return;
+
+    // NORMAL → FREQ
+    if (currentMode == MODE_NORMAL) {
+        previousMode = currentMode;
+        currentMode = MODE_FREQ;
+        freqCycleStartTime = 0; // reset strobe cycle
+        return;
+    }
+
+    // FREQ → NORMAL
+    if (currentMode == MODE_FREQ) {
+        previousMode = currentMode;
+        currentMode = MODE_NORMAL;
+        return;
+    }
 
     if (currentMode == MODE_NORMAL) {
         previousMode = currentMode;

@@ -1,11 +1,12 @@
+#include "pots.h"
 #include "pins.h"
 #include "modes.h"
 #include "state.h"
-#include "pots.h"
+#include "inputs.h"        // <-- must come before using lastCCTADC
+#include "ledmix.h"        // <-- must come before brightnessTableLookup
+#include "freq_mode.h"     // <-- for freqTable and FREQ_STEPS
 #include "calibration.h"
-#include "inputs.h"
 #include "display_ui.h"
-#include "ledmix.h"
 #include "pots_state.h"
 
 // Smooth ADC by averaging 12 samples
@@ -25,7 +26,6 @@ extern const int NORMAL_STEPS;
 static int prevDemoIdx  = -1;
 
 // Shared pot state (global)
-int lastDutyADC       = -1;
 int prevDutyStepIndex = -1;
 int prevCCTStepIndex  = -1;
 
@@ -89,7 +89,6 @@ void processPots(unsigned long now) {
         Serial.println(linearBrightness, 6);
 
         // ----- CCT -----
-        static int lastCCTADC = -1;
         int rawCCTADC = readADC(CCT_POT_PIN);
 
         if (lastCCTADC < 0) lastCCTADC = rawCCTADC;
@@ -233,6 +232,32 @@ void processPots(unsigned long now) {
         }
 
         return;
+    }
+
+    // =====================
+    // FREQ MODE POT ROUTING
+    // =====================
+    if (currentMode == MODE_FREQ) {
+
+        // --- Brightness (DUTY pot) ---
+        float dutyNorm = (lastDutyADC - DUTY_MIN_RAW) /
+                        float(DUTY_MAX_RAW - DUTY_MIN_RAW);
+        dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
+
+        // Use NORMAL brightness mapping
+        targetBrightness = brightnessTableLookup(dutyNorm);
+
+        // --- Frequency (CCT pot) ---
+        float cctNorm = (lastCCTADC - CCT_MIN_RAW) /
+                        float(CCT_MAX_RAW - CCT_MIN_RAW);
+        cctNorm = constrain(cctNorm, 0.0f, 1.0f);
+
+        int idx = round(cctNorm * (FREQ_STEPS - 1));
+        idx = constrain(idx, 0, FREQ_STEPS - 1);
+
+        freqStrobeHz = freqTable[idx];
+
+        return; // done for FREQ mode
     }
 
     // ===============================

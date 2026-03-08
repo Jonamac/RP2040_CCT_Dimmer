@@ -8,3 +8,4 @@ void applyLEDsImmediate(float brightness, float cct);
 void updateLEDLogic(unsigned long now);
 
 float applyGamma(float v);
+float brightnessTableLookup(float norm);

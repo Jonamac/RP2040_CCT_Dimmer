@@ -99,6 +99,15 @@ extern int   knob_click_freq;
 extern int   knob_click_ms;
 
 // ===============================
+// FREQ MODE
+// ===============================
+
+extern float freqStrobeHz;
+extern float freqDutyCycle;
+extern unsigned long freqCycleStartTime;
+extern bool freqOnPhase;
+
+// ===============================
 //  CAL / PRESET STATE
 // ===============================
 

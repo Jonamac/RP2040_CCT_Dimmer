@@ -1,4 +1,5 @@
 #include "ledmix.h"
+#include "brightness_table.h"
 
 float applyGamma(float v) {
   if (v <= 0) return 0;
@@ -145,6 +146,13 @@ void applyLEDsImmediate(float brightness, float cct) {
     setCoolDuty(dutyCool);
 }
 
+float brightnessTableLookup(float norm) {
+    // Use your existing brightness table
+    int idx = round(norm * (BRIGHTNESS_STEPS - 1));
+    idx = constrain(idx, 0, BRIGHTNESS_STEPS - 1);
+    return brightnessTable[idx];
+}
+
 void updateLEDLogic(unsigned long now) {
     //debug
     Serial.print("DUMB FADE: mode=");
@@ -181,6 +189,39 @@ void updateLEDLogic(unsigned long now) {
 
     // 2) DUMB mode (no generic fade when not in a DUMB-specific fade)
     if (currentMode == MODE_DUMB) {
+        return;
+    }
+
+    // =====================
+    // FREQ MODE STROBE ENGINE
+    // =====================
+    if (currentMode == MODE_FREQ) {
+
+        unsigned long now = millis();
+
+        // Initialize cycle start
+        if (freqCycleStartTime == 0) {
+            freqCycleStartTime = now;
+            freqOnPhase = true;
+        }
+
+        float periodMs = 1000.0f / freqStrobeHz;
+        float onMs = periodMs * freqDutyCycle;
+
+        unsigned long elapsed = now - freqCycleStartTime;
+
+        // Wrap cycle
+        if (elapsed >= periodMs) {
+            freqCycleStartTime = now;
+            elapsed = 0;
+        }
+
+        // Determine phase
+        bool onNow = (elapsed < onMs);
+
+        float effectiveB = onNow ? currentBrightness : 0.0f;
+
+        applyLEDsImmediate(effectiveB, currentCCT);
         return;
     }
 
