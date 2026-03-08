@@ -8,8 +8,8 @@
 enum Mode {
     MODE_NORMAL,
     MODE_STANDBY,
-    MODE_OVERRIDE,
-    MODE_OVERRIDE_PLUS,
+    MODE_FREQ,   // formerly MODE_OVERRIDE
+    MODE_CAL,    // formerly MODE_OVERRIDE_PLUS
     MODE_DEMO,
     MODE_DUMB
 };

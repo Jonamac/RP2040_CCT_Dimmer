@@ -94,7 +94,7 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
     display.print((int)dispC);
     display.print("K");
 
-    // Main mode label (NORMAL, DUMB, DEMO, OVERRIDE, OVERRIDE+)
+    // Main mode label (NORMAL, DUMB, DEMO, FREQ, CAL)
     if (modeLabel && strlen(modeLabel) > 0) {
         display.setCursor(68, 12);
         display.print(modeLabel);
@@ -141,8 +141,8 @@ void updateDisplayLogic(unsigned long now) {
             case MODE_NORMAL:        modeLabel = "NORMAL"; break;
             case MODE_DUMB:          modeLabel = "DUMB"; break;
             case MODE_DEMO:          modeLabel = "DEMO"; break;
-            case MODE_OVERRIDE:      modeLabel = "OVERRIDE"; break;
-            case MODE_OVERRIDE_PLUS: modeLabel = "OVERRIDE+"; break;
+            case MODE_FREQ: modeLabel = "FREQ"; break;
+            case MODE_CAL:  modeLabel = "CAL";  break;
             default:                 modeLabel = ""; break;
         }
     }
@@ -151,8 +151,8 @@ void updateDisplayLogic(unsigned long now) {
         switch (currentMode) {
             case MODE_NORMAL:        modeLabel = "NORMAL"; break;
             case MODE_DUMB:          modeLabel = "DUMB"; break;
-            case MODE_OVERRIDE:      modeLabel = "OVERRIDE"; break;
-            case MODE_OVERRIDE_PLUS: modeLabel = "OVERRIDE+"; break;
+            case MODE_FREQ: modeLabel = "FREQ"; break;
+            case MODE_CAL:  modeLabel = "CAL";  break;
 
             case MODE_DEMO:
                 // If a speed flash is active, show SPEED instead of DEMO

@@ -27,7 +27,7 @@ void applyLEDsImmediate(float brightness, float cct) {
 
     // 2. Gamma usage
     bool useGamma =
-        !(currentMode == MODE_OVERRIDE || currentMode == MODE_OVERRIDE_PLUS);
+        !(currentMode == MODE_FREQ || currentMode == MODE_CAL);
 
     float B_linear      = brightness;
     float B_perceptual  = useGamma ? applyGamma(B_linear) : B_linear;
@@ -197,7 +197,7 @@ void updateLEDLogic(unsigned long now) {
     float fadeMs;
     if (currentMode == MODE_STANDBY) {
         fadeMs = standby_fade_time_ms;
-    } else if (currentMode == MODE_OVERRIDE || currentMode == MODE_OVERRIDE_PLUS) {
+    } else if (currentMode == MODE_FREQ || currentMode == MODE_CAL) {
         fadeMs = fade_time_ms / 2.0f;
     } else {
         fadeMs = fade_time_ms;

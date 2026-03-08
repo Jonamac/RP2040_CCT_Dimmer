@@ -238,7 +238,7 @@ void processPots(unsigned long now) {
     // ===============================
     //  OVERRIDE / OVERRIDE+ BRIGHTNESS
     // ===============================
-    if (currentMode == MODE_OVERRIDE || currentMode == MODE_OVERRIDE_PLUS) {
+    if (currentMode == MODE_FREQ || currentMode == MODE_CAL) {
 
         float dutyNorm = (lastDutyADC - DUTY_MIN_RAW) /
                          float(DUTY_MAX_RAW - DUTY_MIN_RAW);
@@ -339,7 +339,7 @@ void processPots(unsigned long now) {
     // ===============================
     //  OVERRIDE+ MODE — CCT PRESETS
     // ===============================
-    if (currentMode == MODE_OVERRIDE_PLUS) {
+    if (currentMode == MODE_CAL) {
 
         int rawCCTADC = readADC(CCT_POT_PIN);
 
@@ -357,9 +357,9 @@ void processPots(unsigned long now) {
             idx = 4;
         }
 
-        if (idx != overridePresetIndex) {
-            overridePresetIndex = idx;
-            targetCCT           = overridePresets[idx];
+        if (idx != calPresetIndex) {
+            calPresetIndex = idx;
+            targetCCT           = calPresets[idx];
             lastInputChangeTime = now;
 
             if (systemInitialized &&

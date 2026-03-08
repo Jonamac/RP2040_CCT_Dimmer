@@ -203,8 +203,8 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
     }
 
         // Return to OVERRIDE+
-        if (previousMode == MODE_OVERRIDE_PLUS) {
-            currentMode = MODE_OVERRIDE_PLUS;
+        if (previousMode == MODE_CAL) {
+            currentMode = MODE_CAL;
 
             int rawDutyADC = analogRead(DUTY_POT_PIN);
             float dutyNorm = (rawDutyADC - DUTY_MIN_RAW) /
@@ -225,8 +225,8 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
             int rawCCTADC = analogRead(CCT_POT_PIN);
             int cidx = map(rawCCTADC, CCT_MIN_RAW, CCT_MAX_RAW, 0, 4);
             cidx = constrain(cidx, 0, 4);
-            overridePresetIndex = cidx;
-            targetCCT           = overridePresets[cidx];
+            calPresetIndex = cidx;
+            targetCCT           = calPresets[cidx];
 
             if (systemInitialized) {
                 buzzerModeChangeBeep();
@@ -280,7 +280,7 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
     }
 
     // OVERRIDE → cycle CCT presets
-    if (currentMode == MODE_OVERRIDE) {
+    if (currentMode == MODE_FREQ) {
         float c = targetCCT;
 
         if (c >= 4550.0f && c <= 4650.0f) {
@@ -303,7 +303,7 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
     }
 
     // OVERRIDE+ → STANDBY
-    if (currentMode == MODE_OVERRIDE_PLUS) {
+    if (currentMode == MODE_CAL) {
         previousMode     = currentMode;
         currentMode      = MODE_STANDBY;
         targetBrightness = 0.0f;
@@ -368,8 +368,8 @@ void handleDispButtonRelease(unsigned long heldMs) {
     // Short press → toggle display
     if (heldMs < demo_mode_delay_ms) {
 
-        if (currentMode == MODE_OVERRIDE ||
-            currentMode == MODE_OVERRIDE_PLUS) {
+        if (currentMode == MODE_FREQ ||
+            currentMode == MODE_CAL) {
 
             if (!displayOn) {
                 displayOn         = true;
@@ -403,7 +403,7 @@ void handleMainLongPress() {
 
     if (currentMode == MODE_NORMAL) {
         previousMode = currentMode;
-        currentMode  = MODE_OVERRIDE;
+        currentMode  = MODE_FREQ;
 
         int rawDutyADC = analogRead(DUTY_POT_PIN);
         float dutyNorm = (rawDutyADC - DUTY_MIN_RAW) /
@@ -421,11 +421,11 @@ void handleMainLongPress() {
         };
         targetBrightness = overrideBrightnessSteps[idx];
 
-        overridePresetIndex = 2;
-        targetCCT           = overridePresets[overridePresetIndex];
+        calPresetIndex = 2;
+        targetCCT           = calPresets[calPresetIndex];
 
-    } else if (currentMode == MODE_OVERRIDE ||
-               currentMode == MODE_OVERRIDE_PLUS ||
+    } else if (currentMode == MODE_FREQ ||
+               currentMode == MODE_CAL ||
                currentMode == MODE_DEMO ||
                currentMode == MODE_STANDBY) {
         previousMode = currentMode;
@@ -449,13 +449,13 @@ void handleMainShortLongCombo() {
     // STANDBY: combo toggles between NORMAL and OVERRIDE+
     if (currentMode == MODE_STANDBY) {
 
-        if (previousMode == MODE_OVERRIDE_PLUS) {
+        if (previousMode == MODE_CAL) {
             // Came from OVERRIDE+ → go to NORMAL
             currentMode = MODE_NORMAL;
         } else {
             // Default: go to OVERRIDE+
             previousMode = MODE_NORMAL;
-            currentMode  = MODE_OVERRIDE_PLUS;
+            currentMode  = MODE_CAL;
         }
 
         if (systemInitialized) {
@@ -467,7 +467,7 @@ void handleMainShortLongCombo() {
 
     if (currentMode == MODE_NORMAL) {
         previousMode = currentMode;
-        currentMode  = MODE_OVERRIDE_PLUS;
+        currentMode  = MODE_CAL;
 
         int rawDutyADC = analogRead(DUTY_POT_PIN);
         float dutyNorm = (rawDutyADC - DUTY_MIN_RAW) /
@@ -488,10 +488,10 @@ void handleMainShortLongCombo() {
         int rawCCTADC = analogRead(CCT_POT_PIN);
         int cIdx = map(rawCCTADC, CCT_MIN_RAW, CCT_MAX_RAW, 0, 4);
         cIdx = constrain(cIdx, 0, 4);
-        overridePresetIndex = cIdx;
-        targetCCT           = overridePresets[cIdx];
+        calPresetIndex = cIdx;
+        targetCCT           = calPresets[cIdx];
 
-    } else if (currentMode == MODE_OVERRIDE_PLUS) {
+    } else if (currentMode == MODE_CAL) {
         previousMode = currentMode;
         currentMode  = MODE_NORMAL;
     }

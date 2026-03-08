@@ -14,14 +14,14 @@ float effective_off_threshold_linear = 0.0010f; // Linear cutoff for OVERRIDE mo
 
 float gamma_val = 2.2f;
 
-float overridePresets[5] = {
+float calPresets[5] = {
   2700.0f,
   3800.0f,
   4600.0f,
   5000.0f,
   6500.0f
 };
-int overridePresetIndex = 0;
+int calPresetIndex = 0;
 
 unsigned long soft_start_ms          = 1250;
 unsigned long dumb_soft_start_ms     = 500;

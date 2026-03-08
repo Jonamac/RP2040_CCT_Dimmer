@@ -99,11 +99,11 @@ extern int   knob_click_freq;
 extern int   knob_click_ms;
 
 // ===============================
-//  OVERRIDE / PRESET STATE
+//  CAL / PRESET STATE
 // ===============================
 
-extern float overridePresets[5];
-extern int   overridePresetIndex;
+extern float calPresets[5];
+extern int   calPresetIndex;
 
 // ===============================
 //  LED ENGINE CONSTANTS
