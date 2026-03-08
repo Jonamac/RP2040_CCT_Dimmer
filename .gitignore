@@ -39,3 +39,24 @@
 
 # debug information files
 *.dwo
+
+# Arduino/Pico build artifacts
+*.elf
+*.bin
+*.uf2
+*.hex
+*.map
+*.lst
+*.o
+*.d
+*.a
+
+# VSCode / PlatformIO
+.vscode/
+.pio/
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
