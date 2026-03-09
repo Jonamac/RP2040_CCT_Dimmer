@@ -7,6 +7,7 @@
 extern float warmDuty;
 extern float coolDuty;
 extern float min_duty;
+float actualDuty = lastDutyNorm;
 
 void toggleDisplay() {
     displayOn = !displayOn;
@@ -71,7 +72,7 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
     // DUTY line
     display.setCursor(0, 2);
     display.print("DUTY ");
-    float actualDuty = dispB;  // dispB is already targetBrightness or currentBrightness
+    float actualDuty = lastDutyNorm;   // normalized pot position
 
     float displayDutyPercent = 0.01f +
         (actualDuty - min_duty) * (99.99f / (1.0f - min_duty));
@@ -106,7 +107,7 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
 
     // Main mode label (NORMAL, DUMB, DEMO, FREQ, CAL)
     if (modeLabel && strlen(modeLabel) > 0) {
-        display.setCursor(68, 12);
+        display.setCursor(90, 12);
         display.print(modeLabel);
     }
 

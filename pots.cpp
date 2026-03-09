@@ -2,14 +2,16 @@
 #include "pins.h"
 #include "modes.h"
 #include "state.h"
-#include "inputs.h"        // <-- must come before using lastCCTADC
-#include "ledmix.h"        // <-- must come before brightnessTableLookup
-#include "freq_mode.h"     // <-- for freqTable and FREQ_STEPS
+#include "inputs.h"
+#include "ledmix.h"
+#include "freq_mode.h"
 #include "calibration.h"
 #include "display_ui.h"
 #include "pots_state.h"
 
-// Smooth ADC by averaging 12 samples
+// ============================================================
+//  ADC SMOOTHING
+// ============================================================
 int readADC(int pin) {
     long sum = 0;
     for (int i = 0; i < 12; i++) {
@@ -18,110 +20,82 @@ int readADC(int pin) {
     return sum / 12;
 }
 
-// Normal mode brightness steps (declared in calibration.h)
-extern const float normalBrightnessSteps[];
-extern const int NORMAL_STEPS;
-
 // DEMO brightness tracking
-static int prevDemoIdx  = -1;
+static int prevDemoIdx = -1;
 
-// Shared pot state (global)
-int prevDutyStepIndex = -1;
-int prevCCTStepIndex  = -1;
+// NORMAL mode step tracking
+static int prevDutyStepIndex = -1;
+static int prevCCTStepIndex  = -1;
 
 // DEMO speed tracking
 static int lastDemoSpeedADC = -1;
 
-// NORMAL/OVERRIDE brightness tracking
-static int dutyStepIndex = -1;
-
-// Reset DEMO brightness tracking
-void resetDemoBrightnessTracking() {
-    prevDemoIdx       = -1;
-    lastDutyADC       = -1;
-    lastDemoSpeedADC  = -1;
-}
-
-// -----------------------------
-//  DUMB MODE SWITCH HANDLING MOVED TO MODES.CPP
-// -----------------------------
-
-// -----------------------------
-//  POT LOGIC
-// -----------------------------
+// ============================================================
+//  MAIN POT PROCESSOR
+// ============================================================
 void processPots(unsigned long now) {
 
-    //debug
-        if (currentMode == MODE_DUMB) {
-        Serial.println("DUMB block running");
-    }
-
-    // First handle DUMB switch transitions
-    // handleDumbSwitch(now); //handled in readInputs()
-
-    // ===== DUTY POT =====
+    // ============================================================
+    //  UNIVERSAL POT NORMALIZATION (runs once per frame)
+    // ============================================================
     int rawDutyADC = readADC(DUTY_POT_PIN);
+    int rawCCTADC  = readADC(CCT_POT_PIN);
 
     if (lastDutyADC < 0) lastDutyADC = rawDutyADC;
     if (abs(rawDutyADC - lastDutyADC) >= 20)
         lastDutyADC = rawDutyADC;
 
-    // ===============================
+    if (lastCCTADC < 0) lastCCTADC = rawCCTADC;
+    if (abs(rawCCTADC - lastCCTADC) >= 20)
+        lastCCTADC = rawCCTADC;
+
+    float dutyNorm = (lastDutyADC - DUTY_MIN_RAW) /
+                     float(DUTY_MAX_RAW - DUTY_MIN_RAW);
+    dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
+    lastDutyNorm = dutyNorm;
+
+    float cctNorm = (lastCCTADC - CCT_MIN_RAW) /
+                    float(CCT_MAX_RAW - CCT_MIN_RAW);
+    cctNorm = constrain(cctNorm, 0.0f, 1.0f);
+    lastCCTNorm = cctNorm;
+
+    float mappedCCT = 2700.0f + cctNorm * (6500.0f - 2700.0f);
+    lastMappedCCT = mappedCCT;
+
+    // ============================================================
     //  DUMB MODE — RAW ANALOG CONTROL
-    // ===============================
+    // ============================================================
     if (currentMode == MODE_DUMB && !dumbFadeActive) {
 
-        // ----- BRIGHTNESS -----
-        float dutyNorm = (lastDutyADC - DUTY_MIN_RAW) /
-                        float(DUTY_MAX_RAW - DUTY_MIN_RAW);
-        dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
+        Serial.println("[DUMB] Processing pots");
 
-        float linearBrightness = min_duty + dutyNorm * (1.0f - min_duty);
+        // Brightness (linear, min_duty aware)
+        float linB = min_duty + dutyNorm * (1.0f - min_duty);
+        currentBrightness = linB;
+        targetBrightness  = linB;
 
-        currentBrightness = linearBrightness;
-        targetBrightness  = linearBrightness;
-
-        Serial.print("DUMB POT: rawDutyADC=");
-        Serial.print(lastDutyADC);
-        Serial.print(" dutyNorm=");
-        Serial.print(dutyNorm, 4);
-        Serial.print(" linB=");
-        Serial.println(linearBrightness, 6);
-
-        // ----- CCT -----
-        int rawCCTADC = readADC(CCT_POT_PIN);
-
-        if (lastCCTADC < 0) lastCCTADC = rawCCTADC;
-        if (abs(rawCCTADC - lastCCTADC) >= 20)
-            lastCCTADC = rawCCTADC;
-
-        float cctNorm = (lastCCTADC - CCT_MIN_RAW) /
-                        float(CCT_MAX_RAW - CCT_MIN_RAW);
-        cctNorm = constrain(cctNorm, 0.0f, 1.0f);
-
-        if (cctNorm < 0.02f) cctNorm = 0.0f;
-        if (cctNorm > 0.98f) cctNorm = 1.0f;
-
-        float cct = 2700.0f + cctNorm * (6500.0f - 2700.0f);
-
-        if (cct > 4551.0f && cct < 4649.0f)
-            cct = 4600.0f;
-
+        // CCT direct mapping
+        float cct = mappedCCT;
         currentCCT = cct;
         targetCCT  = cct;
+
+        Serial.print("[DUMB] linB=");
+        Serial.print(linB, 6);
+        Serial.print(" CCT=");
+        Serial.println(cct);
 
         applyLEDsImmediate(currentBrightness, currentCCT);
         return;
     }
 
-    // ===============================
-    //  STANDBY POT ROUTING
-    // ===============================
+    // ============================================================
+    //  STANDBY MODE — ONLY DEMO SPEED ADJUSTMENT
+    // ============================================================
     if (currentMode == MODE_STANDBY) {
 
         if (previousMode == MODE_DEMO) {
 
-            int rawCCTADC = readADC(CCT_POT_PIN);
+            Serial.println("[STANDBY] Adjusting DEMO speed");
 
             if (lastDemoSpeedADC < 0) lastDemoSpeedADC = rawCCTADC;
             if (abs(rawCCTADC - lastDemoSpeedADC) < 40)
@@ -139,16 +113,19 @@ void processPots(unsigned long now) {
             demoSpeedPercent    = speedPct[speedIndex];
             demoSpeedFlashUntil = now + 600;
 
-            return;
+            Serial.print("[STANDBY] DEMO speed=");
+            Serial.println(demoSpeedPercent);
         }
 
         return;
     }
 
-    // ===============================
-    //  DEMO MODE — BRIGHTNESS
-    // ===============================
+    // ============================================================
+    //  DEMO MODE — BRIGHTNESS STEPS
+    // ============================================================
     if (currentMode == MODE_DEMO) {
+
+        Serial.println("[DEMO] Processing brightness");
 
         const float demoSteps[7] = {
             min_duty,
@@ -160,61 +137,32 @@ void processPots(unsigned long now) {
             0.25f
         };
 
-        int idx = 0;
-
-        if (rawDutyADC <= DUTY_MIN_RAW + 40) {
-            idx = 0;
-        }
-        else if (rawDutyADC >= DUTY_MAX_RAW - 80) {
-            idx = 6;
-        }
-        else {
-            idx = map(rawDutyADC, DUTY_MIN_RAW, DUTY_MAX_RAW, 0, 6);
-        }
-
+        int idx = map(lastDutyADC, DUTY_MIN_RAW, DUTY_MAX_RAW, 0, 6);
         idx = constrain(idx, 0, 6);
 
         if (idx != prevDemoIdx) {
-            prevDemoIdx      = idx;
+            prevDemoIdx = idx;
+
             targetBrightness = demoSteps[idx];
-
             currentBrightness = targetBrightness;
+
+            Serial.print("[DEMO] Brightness step=");
+            Serial.print(idx);
+            Serial.print(" B=");
+            Serial.println(targetBrightness, 4);
+
             applyLEDsImmediate(currentBrightness, currentCCT);
-
             lastInputChangeTime = now;
-
-            if (!demoJustResumed &&
-                systemInitialized &&
-                buzzer_click_enabled &&
-                millis() > buzzerQuietUntil)
-            {
-                buzzerClick();
-            }
-
-            demoJustResumed = false;
         }
-    }
 
-    // ===============================
-    //  DEMO MODE — SPEED (CCT knob)
-    // ===============================
-    if (currentMode == MODE_DEMO) {
-
-        int rawCCTADC = readADC(CCT_POT_PIN);
-
+        // DEMO SPEED (CCT pot)
         if (lastDemoSpeedADC < 0) lastDemoSpeedADC = rawCCTADC;
-        if (abs(rawCCTADC - lastDemoSpeedADC) < 40)
-            return;
+        if (abs(rawCCTADC - lastDemoSpeedADC) >= 40) {
 
-        lastDemoSpeedADC = rawCCTADC;
+            lastDemoSpeedADC = rawCCTADC;
 
-        static int lastSpeedIndex = -1;
-
-        int speedIndex = map(rawCCTADC, CCT_MIN_RAW, CCT_MAX_RAW, 0, 4);
-        speedIndex = constrain(speedIndex, 0, 4);
-
-        if (speedIndex != lastSpeedIndex) {
-            lastSpeedIndex = speedIndex;
+            int speedIndex = map(rawCCTADC, CCT_MIN_RAW, CCT_MAX_RAW, 0, 4);
+            speedIndex = constrain(speedIndex, 0, 4);
 
             const int demoSpeeds[5] = {500, 1000, 2500, 3500, 5000};
             const int speedPct[5]   = {100, 75, 50, 25, 1};
@@ -223,176 +171,105 @@ void processPots(unsigned long now) {
             demoSpeedPercent    = speedPct[speedIndex];
             demoSpeedFlashUntil = now + 600;
 
-            if (systemInitialized &&
-                buzzer_click_enabled &&
-                millis() > buzzerQuietUntil)
-            {
-                buzzerClick();
-            }
+            Serial.print("[DEMO] Speed=");
+            Serial.println(demoSpeedPercent);
         }
 
         return;
     }
 
-    // =====================
-    // FREQ MODE POT ROUTING
-    // =====================
+    // ============================================================
+    //  FREQ MODE — BRIGHTNESS + FREQUENCY
+    // ============================================================
     if (currentMode == MODE_FREQ) {
 
-        // --- Brightness (DUTY pot) ---
-        float dutyNorm = (lastDutyADC - DUTY_MIN_RAW) /
-                        float(DUTY_MAX_RAW - DUTY_MIN_RAW);
-        dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
+        Serial.println("[FREQ] Processing pots");
 
-        // Use NORMAL brightness mapping
+        // Brightness
         targetBrightness = brightnessTableLookup(dutyNorm);
+        currentBrightness = targetBrightness; // bypass fade
 
-        // --- Frequency (CCT pot) ---
-        float cctNorm = (lastCCTADC - CCT_MIN_RAW) /
-                        float(CCT_MAX_RAW - CCT_MIN_RAW);
-        cctNorm = constrain(cctNorm, 0.0f, 1.0f);
+        // Freeze CCT
+        targetCCT = currentCCT;
 
+        // Frequency
         int idx = round(cctNorm * (FREQ_STEPS - 1));
         idx = constrain(idx, 0, FREQ_STEPS - 1);
-
         freqStrobeHz = freqTable[idx];
 
-        return; // done for FREQ mode
+        Serial.print("[FREQ] B=");
+        Serial.print(targetBrightness, 4);
+        Serial.print(" Hz=");
+        Serial.println(freqStrobeHz);
+
+        return;
     }
 
-    // ===============================
-    //  OVERRIDE / OVERRIDE+ BRIGHTNESS
-    // ===============================
-    if (currentMode == MODE_FREQ || currentMode == MODE_CAL) {
+    // ============================================================
+    //  CAL MODE — CCT PRESETS
+    // ============================================================
+    if (currentMode == MODE_CAL) {
 
-        float dutyNorm = (lastDutyADC - DUTY_MIN_RAW) /
-                         float(DUTY_MAX_RAW - DUTY_MIN_RAW);
-        dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
+        Serial.println("[CAL] Processing pots");
 
-        int idealIdx = (int)round(dutyNorm * 19.0f);
-        idealIdx = constrain(idealIdx, 0, 19);
+        int idx = map(lastCCTADC, CCT_MIN_RAW, CCT_MAX_RAW, 0, 4);
+        idx = constrain(idx, 0, 4);
 
-        dutyStepIndex = idealIdx;
+        if (idx != calPresetIndex) {
+            calPresetIndex = idx;
+            targetCCT = calPresets[idx];
 
-        if (dutyStepIndex != prevDutyStepIndex) {
-            prevDutyStepIndex = dutyStepIndex;
-
-            const float overrideBrightnessSteps[20] = {
-                0.0012f, 0.0014f, 0.0016f, 0.0018f, 0.0020f,
-                0.0022f, 0.0024f, 0.0026f, 0.0028f, 0.0030f,
-                0.0032f, 0.0034f, 0.0036f, 0.0038f, 0.0040f,
-                0.0045f, 0.0050f, 0.0060f, 0.0080f, 0.0200f
-            };
-            targetBrightness = overrideBrightnessSteps[dutyStepIndex];
+            Serial.print("[CAL] CCT preset=");
+            Serial.println(targetCCT);
 
             lastInputChangeTime = now;
-            if (systemInitialized &&
-                buzzer_click_enabled &&
-                millis() > buzzerQuietUntil)
-            {
-                buzzerClick();
-            }
         }
+
+        return;
     }
 
-    // ===============================
-    //  NORMAL MODE — BRIGHTNESS
-    // ===============================
+    // ============================================================
+    //  NORMAL MODE — BRIGHTNESS + CCT
+    // ============================================================
     if (currentMode == MODE_NORMAL) {
 
-        float dutyNorm = (lastDutyADC - DUTY_MIN_RAW) /
-                         float(DUTY_MAX_RAW - DUTY_MIN_RAW);
-        dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
+        Serial.println("[NORMAL] Processing pots");
 
+        // ----- BRIGHTNESS -----
         int idealIdx = (int)round(dutyNorm * (NORMAL_STEPS - 1));
         idealIdx = constrain(idealIdx, 0, NORMAL_STEPS - 1);
 
-        dutyStepIndex = idealIdx;
+        if (idealIdx != prevDutyStepIndex) {
+            prevDutyStepIndex = idealIdx;
 
-        if (dutyStepIndex != prevDutyStepIndex) {
-            prevDutyStepIndex = dutyStepIndex;
+            targetBrightness = normalBrightnessSteps[idealIdx];
 
-            targetBrightness = normalBrightnessSteps[dutyStepIndex];
+            Serial.print("[NORMAL] Brightness step=");
+            Serial.print(idealIdx);
+            Serial.print(" B=");
+            Serial.println(targetBrightness, 4);
 
             lastInputChangeTime = now;
-            if (systemInitialized &&
-                buzzer_click_enabled &&
-                millis() > buzzerQuietUntil)
-            {
-                buzzerClick();
-            }
         }
-    }
 
-    // ===============================
-    //  CCT POT — NORMAL MODE ONLY
-    // ===============================
-    if (currentMode == MODE_NORMAL) {
-
-        static int lastCCTADC = -1;
-
-        int rawCCTADC = readADC(CCT_POT_PIN);
-
-        if (lastCCTADC < 0) lastCCTADC = rawCCTADC;
-        if (abs(rawCCTADC - lastCCTADC) < 20) {
-            return;
-        }
-        lastCCTADC = rawCCTADC;
-
-        float norm = (rawCCTADC - CCT_MIN_RAW) /
-                     float(CCT_MAX_RAW - CCT_MIN_RAW);
-        norm = constrain(norm, 0.0f, 1.0f);
-
-        float rawCCT = 2700.0f + norm * (6500.0f - 2700.0f);
+        // ----- CCT -----
+        float rawCCT = mappedCCT;
         int stepIndex = (int)round((rawCCT - 2700.0f) / 100.0f);
         stepIndex = constrain(stepIndex, 0, 38);
 
         if (stepIndex != prevCCTStepIndex) {
-            prevCCTStepIndex    = stepIndex;
-            targetCCT           = 2700.0f + stepIndex * 100.0f;
+            prevCCTStepIndex = stepIndex;
+
+            targetCCT = 2700.0f + stepIndex * 100.0f;
+
+            Serial.print("[NORMAL] CCT step=");
+            Serial.print(stepIndex);
+            Serial.print(" CCT=");
+            Serial.println(targetCCT);
+
             lastInputChangeTime = now;
-
-            if (systemInitialized &&
-                buzzer_click_enabled &&
-                millis() > buzzerQuietUntil)
-            {
-                buzzerClick();
-            }
-        }
-    }
-
-    // ===============================
-    //  OVERRIDE+ MODE — CCT PRESETS
-    // ===============================
-    if (currentMode == MODE_CAL) {
-
-        int rawCCTADC = readADC(CCT_POT_PIN);
-
-        static int lastOverrideADC = -1;
-        if (lastOverrideADC < 0) lastOverrideADC = rawCCTADC;
-        if (abs(rawCCTADC - lastOverrideADC) < 20) {
-            return;
-        }
-        lastOverrideADC = rawCCTADC;
-
-        int idx = map(rawCCTADC, CCT_MIN_RAW, CCT_MAX_RAW, 0, 4);
-        idx = constrain(idx, 0, 4);
-
-        if (rawCCTADC > CCT_MAX_RAW - 30) {
-            idx = 4;
         }
 
-        if (idx != calPresetIndex) {
-            calPresetIndex = idx;
-            targetCCT           = calPresets[idx];
-            lastInputChangeTime = now;
-
-            if (systemInitialized &&
-                buzzer_click_enabled &&
-                millis() > buzzerQuietUntil)
-            {
-                buzzerClick();
-            }
-        }
+        return;
     }
 }

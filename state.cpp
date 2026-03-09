@@ -74,6 +74,9 @@ float dumbFadeStartB = 0.0f;
 float dumbFadeEndB = 0.0f;
 unsigned long dumbFadeStartTime = 0;
 unsigned long dumbFadeDuration = 0;
+float lastDutyNorm = 0.0f;
+float lastCCTNorm = 0.0f;
+float lastMappedCCT = 4600.0f;
 
 unsigned long demoPhaseStartTime = 0;
 int demoPhaseIndex               = 0;

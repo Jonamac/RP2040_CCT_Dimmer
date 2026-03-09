@@ -31,8 +31,6 @@ void handleDumbSwitch(unsigned long now) {
 
         // Force immediate pot resync
         lastDutyADC       = -1;
-        prevDutyStepIndex = -1;
-        prevCCTStepIndex  = -1;
 
         // Do NOT touch currentBrightness/targetBrightness/lastLEDUpdateTime here
 
@@ -244,7 +242,7 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
         if (previousMode == MODE_DEMO) {
             currentMode = MODE_DEMO;
             demoJustResumed = true;
-            resetDemoBrightnessTracking();
+            
             if (systemInitialized) {
                 buzzerModeChangeBeep();
                 buzzerQuietUntil = millis() + 200;
@@ -361,7 +359,7 @@ void handleDispButtonRelease(unsigned long heldMs) {
             demoPhaseIndex      = 0;
             demoPhaseStartTime  = millis();
             demoJustResumed     = true;
-            resetDemoBrightnessTracking();
+            
         }
         if (systemInitialized) {
             buzzerModeChangeBeep();
@@ -565,7 +563,7 @@ void handleDispShortLongCombo() {
         demoPhaseIndex      = 0;
         demoPhaseStartTime  = millis();
         demoJustResumed     = true;
-        resetDemoBrightnessTracking();
+        
 
         int rawDutyADC = analogRead(DUTY_POT_PIN);
         int idx = map(rawDutyADC, DUTY_MIN_RAW, DUTY_MAX_RAW, 0, 6);

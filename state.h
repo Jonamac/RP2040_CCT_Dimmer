@@ -54,6 +54,9 @@ extern float dumbFadeStartB;
 extern float dumbFadeEndB;
 extern unsigned long dumbFadeStartTime;
 extern unsigned long dumbFadeDuration;
+extern float lastDutyNorm;
+extern float lastCCTNorm;
+extern float lastMappedCCT;
 
 // ===============================
 //  BUZZER STATE

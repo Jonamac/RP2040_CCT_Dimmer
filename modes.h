@@ -6,12 +6,12 @@
 // =====================================================
 
 enum Mode {
-    MODE_NORMAL,
-    MODE_STANDBY,
-    MODE_FREQ,   // formerly MODE_OVERRIDE
-    MODE_CAL,    // formerly MODE_OVERRIDE_PLUS
-    MODE_DEMO,
-    MODE_DUMB
+    MODE_NORMAL,        // 0
+    MODE_DUMB,          // 1
+    MODE_DEMO,          // 2
+    MODE_FREQ,          // 3  (formerly MODE_OVERRIDE)
+    MODE_CAL,           // 4  (formerly MODE_OVERRIDE_PLUS)
+    MODE_STANDBY        // 5
 };
 
 // =====================================================
