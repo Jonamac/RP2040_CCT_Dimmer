@@ -156,10 +156,44 @@ float brightnessTableLookup(float norm)
 }
 
 // ============================================================
-// LED engine update — DUMB fade + FREQ strobe
+// LED engine update — NORMAL fade + DUMB fade + FREQ strobe
 // ============================================================
 void updateLEDLogic(unsigned long now)
 {
+    // ---------------------------
+    // NORMAL fade engine
+    // (STANDBY→NORMAL, NORMAL→STANDBY, boot)
+    // ---------------------------
+    if (normalFadeActive)
+    {
+        unsigned long elapsed =
+            (now >= normalFadeStartTime) ? (now - normalFadeStartTime) : 0;
+
+        float t = (float)elapsed / (float)normalFadeDuration;
+        if (t > 1.0f) t = 1.0f;
+
+        float newB = normalFadeStartB + (normalFadeEndB - normalFadeStartB) * t;
+
+        led_currentBrightness = newB;
+        led_currentCCT        = led_targetCCT;  // CCT snaps, not faded
+
+        applyLEDsImmediate(led_currentBrightness, led_currentCCT);
+
+        if (t >= 1.0f)
+        {
+            normalFadeActive = false;
+
+            if (bootFadeActive)
+            {
+                bootFadeActive       = false;
+                systemInitialized    = true;
+                buzzer_click_enabled = true;  // enable clicks after NORMAL boot
+            }
+        }
+
+        return;
+    }
+
     // ---------------------------
     // DUMB fade engine
     // ---------------------------
@@ -177,7 +211,16 @@ void updateLEDLogic(unsigned long now)
         applyLEDsImmediate(led_currentBrightness, led_currentCCT);
 
         if (t >= 1.0f)
+        {
             dumbFadeActive = false;
+
+            if (bootFadeActive)
+            {
+                bootFadeActive    = false;
+                systemInitialized = true;
+                // buzzer_click_enabled stays false in DUMB — buzzer PR handles this
+            }
+        }
 
         return;
     }

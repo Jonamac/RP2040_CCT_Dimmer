@@ -146,7 +146,12 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
         previousMode = currentMode;
         currentMode  = MODE_STANDBY;
 
-        ledmix_set(0.0f, ledmix_getCCT());
+        // Start NORMAL fade DOWN to 0
+        normalFadeActive    = true;
+        normalFadeStartB    = ledmix_getBrightness();
+        normalFadeEndB      = 0.0f;
+        normalFadeStartTime = now;
+        normalFadeDuration  = standby_fade_time_ms;
 
         if (systemInitialized) {
             buzzerModeChangeBeep();
@@ -220,7 +225,13 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
             float newC = 2700.0f + stepIndex * 100.0f;
 
             ledmix_set(newB, newC);
-            applyLEDsImmediate(newB, newC);
+
+            // Start NORMAL fade UP from 0
+            normalFadeActive    = true;
+            normalFadeStartB    = 0.0f;
+            normalFadeEndB      = newB;
+            normalFadeStartTime = now;
+            normalFadeDuration  = standby_fade_time_ms;
 
             if (systemInitialized) {
                 buzzerModeChangeBeep();
@@ -299,6 +310,12 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
         float newC = 2700.0f + stepIndex * 100.0f;
 
         ledmix_set(newB, newC);
+
+        normalFadeActive    = true;
+        normalFadeStartB    = 0.0f;
+        normalFadeEndB      = newB;
+        normalFadeStartTime = now;
+        normalFadeDuration  = standby_fade_time_ms;
 
         if (systemInitialized) {
             buzzerModeChangeBeep();
@@ -656,7 +673,7 @@ void updateModeBehavior(unsigned long now) {
         ledmix_set(newB, newC);
     }
 
-    if (currentMode == MODE_STANDBY) {
+    if (currentMode == MODE_STANDBY && !normalFadeActive) {
         ledmix_set(0.0f, ledmix_getCCT());
     }
 }
