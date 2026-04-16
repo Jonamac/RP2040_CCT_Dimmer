@@ -23,35 +23,65 @@ void initModes() {
 // -----------------------------
 //  DUMB MODE SWITCH HANDLING
 // -----------------------------
-static bool lastDumbSwitch = false;
+
+static bool          lastDumbSwitch        = false;
+static bool          dumbSwitchRaw         = false;
+static unsigned long dumbDebounceStartTime = 0;
+static bool          dumbDebouncing        = false;
+
+static const unsigned long DUMB_DEBOUNCE_MS        = 25;
+static const unsigned long DUMB_STARTUP_LOCKOUT_MS = 300;
 
 void handleDumbSwitch(unsigned long now) {
-    bool dumbSwitch = digitalRead(DUMB_SWITCH_PIN);
+
+    // --- Startup lockout: ignore all switch activity for 300 ms after boot ---
+    if (now < DUMB_STARTUP_LOCKOUT_MS) return;
+
+    bool raw = digitalRead(DUMB_SWITCH_PIN);
+
+    // --- Debounce: only act after the reading has been stable for DUMB_DEBOUNCE_MS ---
+    if (raw != dumbSwitchRaw) {
+        // Reading changed — start or restart the debounce timer
+        dumbSwitchRaw         = raw;
+        dumbDebounceStartTime = now;
+        dumbDebouncing        = true;
+        return;
+    }
+
+    if (dumbDebouncing) {
+        if ((now - dumbDebounceStartTime) < DUMB_DEBOUNCE_MS) {
+            return; // still within debounce window
+        }
+        // Debounce window elapsed — reading is stable; commit it
+        dumbDebouncing = false;
+    }
+
+    // At this point, `dumbSwitchRaw` is the stable, debounced value.
+    bool dumbSwitch = dumbSwitchRaw;
+
+    // --- Ignore switch changes during active fades ---
+    if (dumbFadeActive)   return;
+    if (normalFadeActive) return;  // declared in state.h; fade engine wired up in PR 3
+
+    // --- Ignore switch changes while in STANDBY (handled by previousMode on exit) ---
+    if (currentMode == MODE_STANDBY) {
+        lastDumbSwitch = dumbSwitch;
+        return;
+    }
 
     // --- SWITCH TURNED ON (entering DUMB MODE) ---
     if (dumbSwitch && !lastDumbSwitch) {
+        lastDutyNorm = -1.0f; // force pot resync
 
-        // Force pot resync
-        lastDutyNorm = -1.0f;
-
-        if (currentMode == MODE_STANDBY) {
-            previousMode = MODE_DUMB;
-        } else {
-            currentMode = MODE_DUMB;
-        }
+        currentMode = MODE_DUMB;
     }
 
     // --- SWITCH TURNED OFF (leaving DUMB MODE) ---
     else if (!dumbSwitch && lastDumbSwitch) {
-
-        if (currentMode == MODE_STANDBY) {
-            previousMode = MODE_NORMAL;
-            currentMode  = MODE_STANDBY;
-        }
-        else if (currentMode == MODE_DUMB) {
+        if (currentMode == MODE_DUMB) {
             currentMode = MODE_NORMAL;
 
-            // Sample pots for NORMAL brightness
+            // Sample pots and snap to NORMAL state
             int rawDutyADC = readADC(DUTY_POT_PIN);
             float dutyNorm = (rawDutyADC - DUTY_MIN_RAW) /
                              float(DUTY_MAX_RAW - DUTY_MIN_RAW);
@@ -61,16 +91,15 @@ void handleDumbSwitch(unsigned long now) {
             idx = constrain(idx, 0, NORMAL_STEPS - 1);
             float newB = normalBrightnessSteps[idx];
 
-            // Sample pots for NORMAL CCT
             int rawCCTADC = readADC(CCT_POT_PIN);
             float norm = (rawCCTADC - CCT_MIN_RAW) /
                          float(CCT_MAX_RAW - CCT_MIN_RAW);
             norm = constrain(norm, 0.0f, 1.0f);
 
-            float rawCCT = 2700.0f + norm * (6500.0f - 2700.0f);
-            int stepIndex = round((rawCCT - 2700.0f) / 100.0f);
-            stepIndex = constrain(stepIndex, 0, 38);
-            float newC = 2700.0f + stepIndex * 100.0f;
+            float rawCCT   = 2700.0f + norm * (6500.0f - 2700.0f);
+            int stepIndex  = round((rawCCT - 2700.0f) / 100.0f);
+            stepIndex      = constrain(stepIndex, 0, 38);
+            float newC     = 2700.0f + stepIndex * 100.0f;
 
             ledmix_set(newB, newC);
             applyLEDsImmediate(newB, newC);

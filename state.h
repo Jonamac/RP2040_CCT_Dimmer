@@ -39,6 +39,9 @@ extern bool standbyFromDumbActive;
 extern float standbyFromDumbStartB;
 extern unsigned long standbyFromDumbStartTime;
 extern bool dumbFadeActive;
+
+// Added in PR 2 — used by handleDumbSwitch(); full engine added in PR 3
+extern bool normalFadeActive;
 extern bool dumbFadeDirection; // true = up, false = down
 extern float dumbFadeStartB;
 extern float dumbFadeEndB;
