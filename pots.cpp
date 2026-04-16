@@ -22,8 +22,22 @@ float lastCCTNorm  = 0.0f;
 
 static const float DUTY_STEP_HYST      = 0.05f;   // 5% of a step
 static const float CCT_STEP_HYST       = 0.05f;
-static const float DUMB_BRIGHTNESS_DB  = 0.002f;  // 0.2% brightness dead-band for ADC noise
+static const float DUMB_BRIGHTNESS_DB  = 0.001f;  // 0.1% brightness dead-band for ADC noise
 static const float DUMB_CCT_DB         = 5.0f;    // 5 K CCT dead-band for ADC noise
+
+// Seed state — set by initPotState(), consumed on first handlePots() call
+static float _seedDutyNorm  = -1.0f;
+static float _seedCCTNorm   = -1.0f;
+static int   _seedDutyStep  = -1;
+static int   _seedCCTStep   = -1;
+
+void initPotState(int dutyStep, int cctStep, float dutyNorm, float cctNorm)
+{
+    _seedDutyNorm = dutyNorm;
+    _seedCCTNorm  = cctNorm;
+    _seedDutyStep = dutyStep;
+    _seedCCTStep  = cctStep;
+}
 
 // Local state
 static int prevDutyStep = -1;
@@ -51,9 +65,24 @@ void handlePots(unsigned long now)
     static float cctFiltered  = -1.0f;
 
     if (dutyFiltered < 0.0f) {
-        // First real call after boot — seed filter to actual value
-        dutyFiltered = dutyNorm;
-        cctFiltered  = cctNorm;
+        if (_seedDutyNorm >= 0.0f) {
+            // Consume seed from initPotState() — first call lands on same step as boot fade
+            dutyFiltered      = _seedDutyNorm;
+            cctFiltered       = _seedCCTNorm;
+            prevDutyStep      = _seedDutyStep;
+            prevCCTStep       = _seedCCTStep;
+            currentBrightness = (_seedDutyStep >= 0 && _seedDutyStep < NORMAL_STEPS)
+                                ? normalBrightnessSteps[_seedDutyStep]
+                                : min_duty;
+            currentCCT        = (_seedCCTStep >= 0)
+                                ? (2700.0f + _seedCCTStep * 100.0f)
+                                : 4600.0f;
+            _seedDutyNorm = -1.0f;  // mark consumed
+        } else {
+            // No seed — first real call, seed filter from raw ADC (no averaging artifact)
+            dutyFiltered = dutyNorm;
+            cctFiltered  = cctNorm;
+        }
     } else {
         dutyFiltered = dutyFiltered * 0.85f + dutyNorm * 0.15f;
         cctFiltered  = cctFiltered  * 0.85f + cctNorm  * 0.15f;
@@ -69,20 +98,24 @@ void handlePots(unsigned long now)
         // Do not fight an active DUMB fade
         if (dumbFadeActive) return;
 
-        // Continuous brightness: bottom of range = min_duty
-        float newB = min_duty + dutyNorm * (1.0f - min_duty);
+        // Snap to exact extremes to compensate for ADC mechanical limits
+        // (physical pot never quite reaches 0 or 4095)
+        float snappedDutyNorm = dutyNorm;
+        if (snappedDutyNorm < 0.01f) snappedDutyNorm = 0.0f;
+        if (snappedDutyNorm > 0.99f) snappedDutyNorm = 1.0f;
+
+        // Continuous brightness: bottom of range = min_duty, top = 1.0
+        float newB = min_duty + snappedDutyNorm * (1.0f - min_duty);
         float newC = 2700.0f + cctNorm * (6500.0f - 2700.0f);
 
         static float prevDumbB = -1.0f;
         static float prevDumbC = -1.0f;
-        bool isFirstCall = (prevDumbB < 0.0f);
 
-        // Only update if change exceeds dead-band (prevents ADC jitter from
-        // causing constant LED flicker and display digit bounce)
-        bool brightnessChanged = fabsf(newB - prevDumbB) > DUMB_BRIGHTNESS_DB;
-        bool cctChanged        = fabsf(newC - prevDumbC) > DUMB_CCT_DB;
+        // First call (sentinel < 0) or change exceeds dead-band
+        bool brightnessChanged = (prevDumbB < 0.0f) || (fabsf(newB - prevDumbB) > DUMB_BRIGHTNESS_DB);
+        bool cctChanged        = (prevDumbC < 0.0f) || (fabsf(newC - prevDumbC) > DUMB_CCT_DB);
 
-        if (isFirstCall || brightnessChanged || cctChanged) {
+        if (brightnessChanged || cctChanged) {
             currentBrightness = newB;
             currentCCT        = newC;
             prevDumbB         = newB;

@@ -4,6 +4,7 @@
 #include "pwm_control.h"
 #include "buzzer.h"
 #include "inputs.h"
+#include "pots.h"
 #include "ledmix.h"
 #include "display_ui.h"
 #include "modes.h"
@@ -98,6 +99,9 @@ void setup() {
 
     // Fire startup beep immediately (buzzerStartupBeep ignores enable flags)
     buzzerStartupBeep();
+
+    // Seed pot filters so first handlePots() call lands on the same step as the boot fade
+    initPotState(idx, stepIdx, dutyNorm, cctNorm);
 
     // Start async NORMAL boot fade
     normalFadeActive    = true;

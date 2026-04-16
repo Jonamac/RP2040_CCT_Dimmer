@@ -77,7 +77,19 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
     // DUTY line
     display.setCursor(0, 2);
     display.print("DUTY ");
-    float displayDutyPercent = ledmix_getBrightness() * 100.0f;
+    float displayDutyPercent;
+    if (currentMode == MODE_DUMB || (currentMode == MODE_STANDBY && previousMode == MODE_DUMB)) {
+        // Normalize DUMB brightness to 0–100% relative to the usable range:
+        // 0% = pot fully down (LEDs at min_duty, just barely on)
+        // 100% = pot fully up
+        float b = ledmix_getBrightness();
+        float range = 1.0f - min_duty;
+        displayDutyPercent = (range > 0.0f) ? ((b - min_duty) / range * 100.0f) : 0.0f;
+        displayDutyPercent = constrain(displayDutyPercent, 0.0f, 100.0f);
+    } else {
+        // NORMAL / STANDBY(from NORMAL) / DEMO / FREQ / etc: raw brightness * 100
+        displayDutyPercent = ledmix_getBrightness() * 100.0f;
+    }
     display.print(displayDutyPercent, 2);
     display.print("%");
 
