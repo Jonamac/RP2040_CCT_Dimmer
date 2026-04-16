@@ -2,31 +2,32 @@
 ![Language](https://img.shields.io/badge/language-C++-brightgreen)
 ![Status](https://img.shields.io/badge/status-in_development-orange)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
-# RP2040_CCT_Dimmer
+
+# RP2040_CCT_Dimmer  
 RP2040 ZERO CCT PWM Dimmer with display
 
 # RP2040 CCT Dimmer (Work in Progress)
 
-This project is an in‑development firmware and hardware design for a custom 
-RP2040‑based CCT (Correlated Color Temperature) LED dimmer. The goal is to 
-create a professional‑grade lighting controller with smooth perceptual dimming, 
+This project is an in‑development firmware and hardware design for a custom  
+RP2040‑based CCT (Correlated Color Temperature) LED dimmer. The goal is to  
+create a professional‑grade lighting controller with smooth perceptual dimming,  
 accurate CCT mixing, multiple operating modes, and a clean user interface.
 
 ## ⚠️ Project Status: Under Construction
 This repository is currently in an active development phase.  
-Features, behavior, and file structure are all subject to change as the system 
+Features, behavior, and file structure are all subject to change as the system  
 is refined, stabilized, and expanded.
 
 A number of modes and subsystems are being redesigned, including:
-- Replacement of legacy OVERRIDE modes with a new **FREQ** (strobe/frequency) mode
-- Addition of a **CAL** (calibration/diagnostic) mode
-- Cleanup of NORMAL, DUMB, STANDBY, and DEMO transitions
-- General codebase stabilization and refactoring
+- Replacement of legacy OVERRIDE modes with a new **FREQ** (strobe/frequency) mode  
+- Addition of a **CAL** (calibration/diagnostic) mode  
+- Cleanup of NORMAL, DUMB, STANDBY, and DEMO transitions  
+- General codebase stabilization and refactoring  
 
 Expect rapid iteration and breaking changes.
 
 ## 🤝 About AI Assistance
-This project is being developed collaboratively with the help of **Microsoft Copilot**, 
+This project is being developed collaboratively with the help of **Microsoft Copilot**,  
 used as a technical assistant for:
 - Architectural planning  
 - Code review and refactoring  
@@ -47,18 +48,20 @@ The project uses a multi‑file Arduino‑style layout, including:
 
 ## 🛠️ Hardware
 The firmware targets a custom PCB built around:
-- Raspberry Pi RP2040 (RP2040 ZERO)
+- Raspberry Pi RP2040 (RP2040 ZERO)  
 - Dual‑channel LED PWM outputs  
 - Two analog pots (brightness + CCT)  
 - OLED display  
 - Buzzer  
-- Optional thermistor and fan support (future)
+- Optional thermistor and fan support (future)  
 
 ## 📌 Notes
-This README is temporary and will be replaced with full documentation once the 
+This README is temporary and will be replaced with full documentation once the  
 core system is stable.
 
-## 🗺️ Roadmap
+---
+
+# 🗺️ Roadmap
 
 ### Phase 1 — Foundation Cleanup (in progress)
 - Stabilize NORMAL, DUMB, STANDBY, and DEMO transitions  
@@ -89,3 +92,73 @@ core system is stable.
 - Verify pot linearity and ADC stability  
 - Validate fade curves and perceptual tuning  
 - Stress-test strobe engine at all frequencies  
+
+---
+
+# 🤖 Handoff to GitHub Copilot (Development Notes)
+
+This project is transitioning from manual iteration to a more automated workflow  
+using **GitHub Copilot**. The following notes summarize the current state of the  
+firmware and outline the remaining tasks so Copilot can assist effectively.
+
+### ✔ Completed / Stable
+- DUMB mode button logic isolated from NORMAL logic  
+- DUMB standby enter/exit behavior implemented  
+- Display DUTY% now reflects targetBrightness  
+- PWM mixing and min_duty handling mostly stable  
+- Repository structure cleaned and documented  
+
+### ⚠️ In Progress / Needs Attention
+These items are partially implemented and require refinement:
+
+#### **1. Startup Stabilization**
+- Add 300 ms startup lockout for DUMB switch  
+- Freeze LED engine during boot fade  
+- Prevent NORMAL → DUMB flicker on startup  
+
+#### **2. DUMB Switch Debounce**
+- Add 20–40 ms debounce  
+- Ignore switch changes during fades and standby transitions  
+
+#### **3. NORMAL Standby Fade-Up**
+- Remove “crossing off/on” shortcut  
+- Ensure fade-up is smooth and consistent  
+
+#### **4. mDUTY Logic**
+- mDUTY should appear **only** when physical PWM = min_duty  
+- Tighten epsilon threshold  
+- Fix NORMAL step 0 to equal min_duty  
+- Apply DUMB-style per-channel min_duty behavior to NORMAL step 0  
+
+#### **5. Brightness Table Rebuild**
+- Use gamma 2.2  
+- Ensure 12 o’clock knob = DUTY 50.00%  
+- Ensure perceptual midpoint matches physical midpoint  
+
+#### **6. Buzzer Behavior**
+- Restore click/beep behavior in NORMAL mode  
+- Ensure DUMB mode does not disable buzzer  
+- Verify dual-button buzzer toggle still works  
+
+#### **7. DUMB CCT Behavior**
+- Apply CCT changes immediately (no dependency on duty knob movement)  
+
+---
+
+# 📦 Development Workflow Notes for Copilot
+
+When working on this repository, GitHub Copilot should:
+- Respect the existing mode architecture (NORMAL, DUMB, STANDBY, DEMO, FREQ, CAL)  
+- Avoid reintroducing legacy OVERRIDE/OVERRIDE+ behavior  
+- Keep brightness and CCT logic centralized in `ledmix.cpp` and `modes.cpp`  
+- Keep button edge detection in `buttons.cpp`  
+- Keep pot sampling in `pots.cpp`  
+- Maintain perceptual correctness (gamma 2.2)  
+- Preserve min_duty behavior across all modes  
+
+This section will be expanded as the project stabilizes.
+
+---
+
+# 📄 License
+MIT License — see `LICENSE` for details.
