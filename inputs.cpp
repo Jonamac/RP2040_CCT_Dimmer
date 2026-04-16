@@ -10,14 +10,17 @@ int readADC(int pin) {
     return analogRead(pin);
 }
 
-// Forward declarations from buttons.cpp and pots.cpp
+// Forward declarations
 void processButtons(unsigned long now);
-void processPots(unsigned long now);
 void handleDumbSwitch(unsigned long now);
 
 void readInputs(unsigned long now) {
 
-    if (currentMode == MODE_NORMAL) {
+    // DUMB switch must always be polled every loop
+    handleDumbSwitch(now);
+
+    // Pots must be sampled in both NORMAL and DUMB modes
+    if (currentMode == MODE_NORMAL || currentMode == MODE_DUMB) {
         handlePots(now);
     }
 
