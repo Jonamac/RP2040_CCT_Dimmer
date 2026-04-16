@@ -65,6 +65,14 @@ void handleDumbSwitch(unsigned long now) {
 
     // --- Ignore switch changes while in STANDBY (handled by previousMode on exit) ---
     if (currentMode == MODE_STANDBY) {
+        // Update previousMode to reflect the current switch position.
+        // This ensures STANDBY exit goes to the correct mode even if
+        // the switch was flipped while in STANDBY.
+        if (dumbSwitch && previousMode != MODE_DUMB) {
+            previousMode = MODE_DUMB;
+        } else if (!dumbSwitch && previousMode == MODE_DUMB) {
+            previousMode = MODE_NORMAL;
+        }
         lastDumbSwitch = dumbSwitch;
         return;
     }

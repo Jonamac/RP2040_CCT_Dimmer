@@ -85,7 +85,7 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
         float b = ledmix_getBrightness();
         float range = 1.0f - min_duty;
         displayDutyPercent = (range > 0.0f) ? ((b - min_duty) / range * 100.0f) : 0.0f;
-        displayDutyPercent = constrain(displayDutyPercent, 0.0f, 100.0f);
+        displayDutyPercent = constrain(displayDutyPercent, 0.01f, 100.0f);
     } else {
         // NORMAL / STANDBY(from NORMAL) / DEMO / FREQ / etc: raw brightness * 100
         displayDutyPercent = ledmix_getBrightness() * 100.0f;

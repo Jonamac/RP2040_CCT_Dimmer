@@ -3,7 +3,7 @@
 int readADC(int pin);
 void handlePots(unsigned long now);
 
-// Called from setup() to seed the IIR filter and step state from boot-time pot readings.
-// Prevents the first handlePots() call from snapping to a different step than what
-// setup() computed for the boot fade target.
-void initPotState(int dutyStep, int cctStep, float dutyNorm, float cctNorm);
+// Called from ledmix.cpp when boot fade completes.
+// Seeds IIR filters and step state to match the fade target,
+// preventing a snap on the first handlePots() call after boot.
+void syncPotsAfterBoot(float brightness, float cct);
