@@ -69,6 +69,9 @@ static float applyCCTBoost(float linearBrightness, float cct)
 // Main pot handler
 void handlePots(unsigned long now)
 {
+    // Freeze pot processing until boot fade completes
+    if (!systemInitialized) return;
+
     // --- Shared: ADC read + normalize + IIR filter ---
     int rawDutyADC = analogRead(DUTY_POT_PIN);
     int rawCCTADC  = analogRead(CCT_POT_PIN);

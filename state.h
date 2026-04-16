@@ -40,7 +40,6 @@ extern float standbyFromDumbStartB;
 extern unsigned long standbyFromDumbStartTime;
 extern bool dumbFadeActive;
 
-// Added in PR 2 — used by handleDumbSwitch(); full engine added in PR 3
 extern bool normalFadeActive;
 extern bool dumbFadeDirection; // true = up, false = down
 extern float dumbFadeStartB;
@@ -50,6 +49,15 @@ extern unsigned long dumbFadeDuration;
 extern float lastDutyNorm;
 extern float lastCCTNorm;
 extern float lastMappedCCT;
+
+// NORMAL fade engine (STANDBY ↔ NORMAL transitions + boot)
+extern float         normalFadeStartB;
+extern float         normalFadeEndB;
+extern unsigned long normalFadeStartTime;
+extern unsigned long normalFadeDuration;
+
+// Boot fade in progress — freezes pots and defers systemInitialized
+extern bool          bootFadeActive;
 
 // ===============================
 //  BUZZER STATE
