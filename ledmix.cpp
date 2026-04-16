@@ -183,6 +183,9 @@ void updateLEDLogic(unsigned long now)
         {
             normalFadeActive = false;
 
+            // Sync target so fallthrough doesn't snap to stale 0
+            led_targetBrightness = normalFadeEndB;
+
             if (bootFadeActive)
             {
                 bootFadeActive       = false;
@@ -213,6 +216,9 @@ void updateLEDLogic(unsigned long now)
         if (t >= 1.0f)
         {
             dumbFadeActive = false;
+
+            // Sync target so fallthrough doesn't snap to stale 0
+            led_targetBrightness = dumbFadeEndB;
 
             if (bootFadeActive)
             {

@@ -226,9 +226,9 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
 
             ledmix_set(newB, newC);
 
-            // Start NORMAL fade UP from 0
+            // Start NORMAL fade UP from min_duty
             normalFadeActive    = true;
-            normalFadeStartB    = 0.0f;
+            normalFadeStartB    = min_duty;
             normalFadeEndB      = newB;
             normalFadeStartTime = now;
             normalFadeDuration  = standby_fade_time_ms;
@@ -312,7 +312,7 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
         ledmix_set(newB, newC);
 
         normalFadeActive    = true;
-        normalFadeStartB    = 0.0f;
+        normalFadeStartB    = min_duty;
         normalFadeEndB      = newB;
         normalFadeStartTime = now;
         normalFadeDuration  = standby_fade_time_ms;
