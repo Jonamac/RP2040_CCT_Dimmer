@@ -7,6 +7,9 @@
 // Set the LED engine's target brightness + CCT
 void ledmix_set(float brightness, float cct);
 
+// Syncs led_current* to led_target* — call once after setup ledmix_set
+void ledmix_initCurrent();
+
 // Get the LED engine's current output state
 float ledmix_getBrightness();
 float ledmix_getCCT();

@@ -1,5 +1,6 @@
 #include "ledmix.h"
 #include "brightness_table.h"
+#include "pots.h"
 
 // ============================================================
 // Internal LED engine state
@@ -26,6 +27,15 @@ void ledmix_set(float brightness, float cct)
 {
     led_targetBrightness = brightness;
     led_targetCCT        = cct;
+}
+
+// ============================================================
+// Sync current to target — call once in setup after ledmix_set
+// ============================================================
+void ledmix_initCurrent()
+{
+    led_currentBrightness = led_targetBrightness;
+    led_currentCCT        = led_targetCCT;
 }
 
 // ============================================================
@@ -191,6 +201,7 @@ void updateLEDLogic(unsigned long now)
                 bootFadeActive       = false;
                 systemInitialized    = true;
                 buzzer_click_enabled = true;  // enable clicks after NORMAL boot
+                syncPotsAfterBoot(normalFadeEndB, led_currentCCT);
             }
         }
 

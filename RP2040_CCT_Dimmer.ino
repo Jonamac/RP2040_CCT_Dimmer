@@ -57,6 +57,7 @@ void setup() {
         // Apply initial state (LEDs off, CCT set)
         ledmix_set(0.0f, startCCT);
         applyLEDsImmediate(0.0f, startCCT);
+        ledmix_initCurrent();
 
         // Start async DUMB boot fade
         dumbFadeActive    = true;
@@ -96,12 +97,10 @@ void setup() {
     // Apply initial state (LEDs off, CCT set)
     ledmix_set(0.0f, startCCT);
     applyLEDsImmediate(0.0f, startCCT);
+    ledmix_initCurrent();
 
     // Fire startup beep immediately (buzzerStartupBeep ignores enable flags)
     buzzerStartupBeep();
-
-    // Seed pot filters so first handlePots() call lands on the same step as the boot fade
-    initPotState(idx, stepIdx, dutyNorm, cctNorm);
 
     // Start async NORMAL boot fade
     normalFadeActive    = true;
