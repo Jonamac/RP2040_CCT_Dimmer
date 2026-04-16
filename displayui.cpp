@@ -6,7 +6,6 @@
 #include <Wire.h>
 
 extern float min_duty;
-float actualDuty = lastDutyNorm;
 int demoSpeedIndex = 0;
 
 void demoModeSetSpeedIndex(int idx) {
@@ -78,19 +77,7 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
     // DUTY line
     display.setCursor(0, 2);
     display.print("DUTY ");
-    float actualDuty = lastDutyNorm;   // normalized pot position
-
-    float physicalDuty =
-    (ledmix_getWarmDuty() + ledmix_getCoolDuty()) * 0.5f;
-
-    float normalized =
-        (physicalDuty - DUTY_PHYSICAL_MIN) /
-        (DUTY_PHYSICAL_MAX - DUTY_PHYSICAL_MIN);
-
-    normalized = constrain(normalized, 0.0f, 1.0f);
-
-    float displayDutyPercent = normalized * 100.0f;
-
+    float displayDutyPercent = ledmix_getBrightness() * 100.0f;
     display.print(displayDutyPercent, 2);
     display.print("%");
 
