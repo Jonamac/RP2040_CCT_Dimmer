@@ -68,6 +68,7 @@ bool standbyFromDumbActive      = false;
 float standbyFromDumbStartB     = 0.0f;
 unsigned long standbyFromDumbStartTime = 0;
 bool dumbFadeActive = false;
+bool normalFadeActive = false;
 bool dumbFadeDirection = false;
 float dumbFadeStartB = 0.0f;
 float dumbFadeEndB = 0.0f;
