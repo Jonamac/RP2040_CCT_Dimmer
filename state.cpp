@@ -14,7 +14,6 @@ float effective_off_threshold_linear = 0.0010f; // Linear cutoff for OVERRIDE mo
 
 float gamma_val = 2.2f;
 
-float freqStrobeHz = 10.0f;          // default
 float freqDutyCycle = 0.5f;          // 50% on-time
 unsigned long freqCycleStartTime = 0;
 bool freqOnPhase = true;
@@ -74,8 +73,6 @@ float dumbFadeStartB = 0.0f;
 float dumbFadeEndB = 0.0f;
 unsigned long dumbFadeStartTime = 0;
 unsigned long dumbFadeDuration = 0;
-float lastDutyNorm = 0.0f;
-float lastCCTNorm = 0.0f;
 float lastMappedCCT = 4600.0f;
 
 unsigned long demoPhaseStartTime = 0;

@@ -14,3 +14,5 @@ inline float getFreqForIndex(int idx) {
     if (idx >= FREQ_STEPS) idx = FREQ_STEPS - 1;
     return freqTable[idx];
 }
+
+void freqModeSetIndex(int idx);

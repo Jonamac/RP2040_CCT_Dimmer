@@ -1,3 +1,4 @@
 #pragma once
 
-extern int lastDutyADC;
+extern float lastDutyNorm;
+extern float lastCCTNorm;

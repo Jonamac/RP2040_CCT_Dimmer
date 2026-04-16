@@ -1,13 +1,19 @@
 #include "display_ui.h"
 #include "state.h"
 #include "pwm_control.h"
+#include "ledmix.h"
 #include <Adafruit_SSD1306.h>
 #include <Wire.h>
 
-extern float warmDuty;
-extern float coolDuty;
 extern float min_duty;
 float actualDuty = lastDutyNorm;
+int demoSpeedIndex = 0;
+
+void demoModeSetSpeedIndex(int idx) {
+    if (idx < 0) idx = 0;
+    if (idx > 6) idx = 6;
+    demoSpeedIndex = idx;
+}
 
 void toggleDisplay() {
     displayOn = !displayOn;
@@ -59,14 +65,14 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
     float dispC;
 
     if (currentMode == MODE_DEMO) {
-        dispB = currentBrightness;
-        dispC = currentCCT;
+        dispB = ledmix_getBrightness();
+        dispC = ledmix_getCCT();
 
         // Round CCT to nearest 50K for readability
         dispC = round(dispC / 50.0f) * 50.0f;
     } else {
-        dispB = targetBrightness;
-        dispC = targetCCT;
+        dispB = ledmix_getBrightness();
+        dispC = ledmix_getCCT();
     }
 
     // DUTY line
@@ -74,11 +80,16 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
     display.print("DUTY ");
     float actualDuty = lastDutyNorm;   // normalized pot position
 
-    float displayDutyPercent = 0.01f +
-        (actualDuty - min_duty) * (99.99f / (1.0f - min_duty));
+    float physicalDuty =
+    (ledmix_getWarmDuty() + ledmix_getCoolDuty()) * 0.5f;
 
-    if (displayDutyPercent < 0.01f) displayDutyPercent = 0.01f;
-    if (displayDutyPercent > 100.0f) displayDutyPercent = 100.0f;
+    float normalized =
+        (physicalDuty - DUTY_PHYSICAL_MIN) /
+        (DUTY_PHYSICAL_MAX - DUTY_PHYSICAL_MIN);
+
+    normalized = constrain(normalized, 0.0f, 1.0f);
+
+    float displayDutyPercent = normalized * 100.0f;
 
     display.print(displayDutyPercent, 2);
     display.print("%");
@@ -90,13 +101,14 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
         display.setCursor(0, 12);
         display.print("FREQ ");
         display.print(freqStrobeHz, 3);
-        display.print(" Hz");
+        display.print("Hz");
     }
     else {
         // Normal CCT line
         display.setCursor(0, 12);
         display.print("CCT ");
-        display.print((int)dispC);
+        int cctRounded = (int)(round(dispC / 100.0f) * 100.0f);
+        display.print(cctRounded);
         display.print("K");
     }
 

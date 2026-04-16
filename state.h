@@ -11,16 +11,6 @@ extern Mode currentMode;
 extern Mode previousMode;
 
 // ===============================
-//  BRIGHTNESS / CCT TARGETS
-// ===============================
-
-extern float targetBrightness;
-extern float targetCCT;
-
-extern float currentBrightness;
-extern float currentCCT;
-
-// ===============================
 //  DEMO MODE STATE
 // ===============================
 

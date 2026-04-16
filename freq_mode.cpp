@@ -1,6 +1,17 @@
 // freq_mode.cpp
 #include "freq_mode.h"
 
+int freqModeIndex = 0;   // global index
+float freqStrobeHz = 1.0f;  // global frequency used by strobe engine
+
+void freqModeSetIndex(int idx) {
+    if (idx < 0) idx = 0;
+    if (idx >= FREQ_STEPS) idx = FREQ_STEPS - 1;
+
+    freqModeIndex = idx;
+    freqStrobeHz = freqTable[idx];
+}
+
 const int FREQ_STEPS = 35;
 
 const float freqTable[FREQ_STEPS] = {

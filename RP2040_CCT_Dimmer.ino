@@ -11,82 +11,81 @@
 #include "freq_mode.h"
 
 void setup() {
-  Serial.begin(115200);
-  analogReadResolution(12);
+    Serial.begin(115200);
+    analogReadResolution(12);
 
-  initPins();
-  initPWM();
-  // Force PWM slices to attach before any mode logic runs
-  analogWrite(WARM_PIN, 0);
-  analogWrite(COOL_PIN, 0);
-  initBuzzer();
-  initDisplay();
-  initTiming();
-  initModes();
+    initPins();
+    initPWM();
+    analogWrite(WARM_PIN, 0);
+    analogWrite(COOL_PIN, 0);
+    initBuzzer();
+    initDisplay();
+    initTiming();
+    initModes();
 
-  pinMode(DUMB_SWITCH_PIN, INPUT_PULLDOWN);
+    pinMode(DUMB_SWITCH_PIN, INPUT_PULLDOWN);
 
-  unsigned long now = millis();
+    unsigned long now = millis();
 
-  // ------------------------------------------------------
-  //  CHECK DUMB MODE *BEFORE* ANYTHING ELSE
-  // ------------------------------------------------------
-  bool dumbAtBoot = digitalRead(DUMB_SWITCH_PIN);
+    // ------------------------------------------------------
+    //  CHECK DUMB MODE *BEFORE* ANYTHING ELSE
+    // ------------------------------------------------------
+    bool dumbAtBoot = digitalRead(DUMB_SWITCH_PIN);
 
-  if (dumbAtBoot) {
+    if (dumbAtBoot) {
+        buzzer_click_enabled = false;
+        buzzer_beep_enabled  = false;
+
+        readInputs(now);
+
+        // Compute pot brightness once
+        float startB = 0.0f;
+        float endB   = ledmix_getBrightness();   // from pots.cpp
+
+        // Start fade UP
+        dumbFadeActive     = true;
+        dumbFadeDirection  = true;
+        dumbFadeStartB     = startB;
+        dumbFadeEndB       = endB;
+        dumbFadeStartTime  = now;
+        dumbFadeDuration   = dumb_soft_start_ms;
+
+        ledmix_set(startB, ledmix_getCCT());
+        applyLEDsImmediate(startB, ledmix_getCCT());
+
+        systemInitialized = true;
+        return;
+    }
+
+    // ------------------------------------------------------
+    //  NORMAL BOOT (soft start)
+    // ------------------------------------------------------
     buzzer_click_enabled = false;
-    buzzer_beep_enabled  = false;
+    buzzer_beep_enabled  = true;
 
     readInputs(now);
 
-    // Compute pot brightness once
-    float startB = 0.0f;
-    float endB   = targetBrightness;
+    float startCCT = ledmix_getCCT();
+    ledmix_set(0.0f, startCCT);
+    applyLEDsImmediate(0.0f, startCCT);
 
-    // Start fade UP
-    dumbFadeActive     = true;
-    dumbFadeDirection  = true;
-    dumbFadeStartB     = startB;
-    dumbFadeEndB       = endB;
-    dumbFadeStartTime  = now;
-    dumbFadeDuration   = dumb_soft_start_ms;
+    const int steps = 100;
+    float targetB = ledmix_getBrightness();
 
-    currentBrightness = startB;
-    currentCCT        = targetCCT;
-    applyLEDsImmediate(currentBrightness, currentCCT);
+    for (int i = 0; i <= steps; i++) {
+        if (i == 0) {
+            buzzerStartupBeep();
+        }
+        float b = targetB * ((float)i / steps);
+        ledmix_set(b, startCCT);
+        applyLEDsImmediate(b, startCCT);
+        delay(soft_start_ms / steps);
+    }
 
+    ledmix_set(targetB, startCCT);
+
+    buzzer_click_enabled = true;
     systemInitialized = true;
-    return;
-  }
-
-
-  // ------------------------------------------------------
-  //  NORMAL BOOT (soft start)
-  // ------------------------------------------------------
-  buzzer_click_enabled = false;
-  buzzer_beep_enabled  = true;
-
-  readInputs(now);
-
-  currentBrightness = 0.0f;
-  currentCCT        = targetCCT;
-  applyLEDsImmediate(0.0f, currentCCT);
-
-  const int steps = 100;
-  for (int i = 0; i <= steps; i++) {
-      if (i == 0) {
-          buzzerStartupBeep();
-      }
-      float b = targetBrightness * ((float)i / steps);
-      applyLEDsImmediate(b, currentCCT);
-      delay(soft_start_ms / steps);
-  }
-
-  currentBrightness = targetBrightness;
-  currentCCT        = targetCCT;
-
-  buzzer_click_enabled = true;
-  systemInitialized = true;
 }
 
 void loop() {

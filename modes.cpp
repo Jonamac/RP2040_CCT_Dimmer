@@ -7,15 +7,17 @@
 #include "display_ui.h"
 #include "ledmix.h"
 #include "pins.h"
+#include "freq_mode.h"
 
 // =====================================================
 //  INITIALIZATION
 // =====================================================
 void initModes() {
-    currentMode      = MODE_NORMAL;
-    previousMode     = MODE_NORMAL;
-    targetBrightness = 0.0f;
-    targetCCT        = 4600.0f;
+    currentMode  = MODE_NORMAL;
+    previousMode = MODE_NORMAL;
+
+    // Initialize LED engine to neutral state
+    ledmix_set(0.0f, 4600.0f);
 }
 
 // -----------------------------
@@ -29,16 +31,11 @@ void handleDumbSwitch(unsigned long now) {
     // --- SWITCH TURNED ON (entering DUMB MODE) ---
     if (dumbSwitch && !lastDumbSwitch) {
 
-        // Force immediate pot resync
-        lastDutyADC       = -1;
-
-        // Do NOT touch currentBrightness/targetBrightness/lastLEDUpdateTime here
+        // Force pot resync
+        lastDutyNorm = -1.0f;
 
         if (currentMode == MODE_STANDBY) {
-            // We’re in STANDBY but the user just enabled DUMB:
-            // remember that we *want* DUMB when we leave STANDBY
             previousMode = MODE_DUMB;
-            // stay in STANDBY for now; fade engine will handle LEDs
         } else {
             currentMode = MODE_DUMB;
         }
@@ -54,30 +51,29 @@ void handleDumbSwitch(unsigned long now) {
         else if (currentMode == MODE_DUMB) {
             currentMode = MODE_NORMAL;
 
-            // Sample pots for NORMAL mode brightness
+            // Sample pots for NORMAL brightness
             int rawDutyADC = readADC(DUTY_POT_PIN);
             float dutyNorm = (rawDutyADC - DUTY_MIN_RAW) /
                              float(DUTY_MAX_RAW - DUTY_MIN_RAW);
             dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
 
-            int idx = (int)round(dutyNorm * (NORMAL_STEPS - 1));
+            int idx = round(dutyNorm * (NORMAL_STEPS - 1));
             idx = constrain(idx, 0, NORMAL_STEPS - 1);
-            targetBrightness = normalBrightnessSteps[idx];
+            float newB = normalBrightnessSteps[idx];
 
-            // Sample pots for NORMAL mode CCT
+            // Sample pots for NORMAL CCT
             int rawCCTADC = readADC(CCT_POT_PIN);
             float norm = (rawCCTADC - CCT_MIN_RAW) /
                          float(CCT_MAX_RAW - CCT_MIN_RAW);
             norm = constrain(norm, 0.0f, 1.0f);
 
             float rawCCT = 2700.0f + norm * (6500.0f - 2700.0f);
-            int stepIndex = (int)round((rawCCT - 2700.0f) / 100.0f);
+            int stepIndex = round((rawCCT - 2700.0f) / 100.0f);
             stepIndex = constrain(stepIndex, 0, 38);
-            targetCCT = 2700.0f + stepIndex * 100.0f;
+            float newC = 2700.0f + stepIndex * 100.0f;
 
-            currentBrightness = targetBrightness;
-            currentCCT        = targetCCT;
-            applyLEDsImmediate(currentBrightness, currentCCT);
+            ledmix_set(newB, newC);
+            applyLEDsImmediate(newB, newC);
         }
     }
 
@@ -95,15 +91,15 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
             previousMode = currentMode;
             currentMode  = MODE_STANDBY;
 
-            // Start fade DOWN using the SAME 'now' as the loop
+            // Start fade DOWN
             dumbFadeActive     = true;
-            dumbFadeDirection  = false; // down
-            dumbFadeStartB     = currentBrightness;
+            dumbFadeDirection  = false;
+            dumbFadeStartB     = ledmix_getBrightness();
             dumbFadeEndB       = 0.0f;
-            dumbFadeStartTime  = now;                 // <-- CHANGED
-            dumbFadeDuration   = dumb_standby_fade_time_ms; // or standby_fade_time_ms
+            dumbFadeStartTime  = now;
+            dumbFadeDuration   = dumb_standby_fade_time_ms;
 
-            targetBrightness = 0.0f;
+            ledmix_set(0.0f, ledmix_getCCT());
 
             if (systemInitialized) {
                 buzzerModeChangeBeep();
@@ -113,14 +109,15 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
         return;
     }
 
-    // Ignore long presses here
+    // Ignore long presses
     if (heldMs > 1500) return;
 
     // NORMAL → STANDBY
     if (currentMode == MODE_NORMAL) {
-        previousMode     = currentMode;
-        currentMode      = MODE_STANDBY;
-        targetBrightness = 0.0f;
+        previousMode = currentMode;
+        currentMode  = MODE_STANDBY;
+
+        ledmix_set(0.0f, ledmix_getCCT());
 
         if (systemInitialized) {
             buzzerModeChangeBeep();
@@ -133,7 +130,7 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
     //  STANDBY EXIT LOGIC
     // =====================================================
     if (currentMode == MODE_STANDBY) {
-        // Leaving STANDBY: stop any DUMB→STANDBY fade
+
         // Return to DUMB MODE
         if (previousMode == MODE_DUMB) {
             previousMode = currentMode;
@@ -146,13 +143,13 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
             float linearBrightness = min_duty + dutyNorm * (1.0f - min_duty);
 
             dumbFadeActive     = true;
-            dumbFadeDirection  = true; // up
+            dumbFadeDirection  = true;
             dumbFadeStartB     = 0.0f;
             dumbFadeEndB       = linearBrightness;
-            dumbFadeStartTime  = now;                 // <-- CHANGED
+            dumbFadeStartTime  = now;
             dumbFadeDuration   = dumb_soft_start_ms;
 
-            targetBrightness = linearBrightness;
+            ledmix_set(linearBrightness, ledmix_getCCT());
 
             if (systemInitialized) {
                 buzzerModeChangeBeep();
@@ -160,50 +157,48 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
             }
             return;
         }
-        
+
+        // Return to FREQ
         if (previousMode == MODE_FREQ) {
             currentMode = MODE_FREQ;
             freqCycleStartTime = 0;
             return;
         }
 
-        // Return to NORMAL MODE
-    if (previousMode == MODE_NORMAL) {
-        previousMode = currentMode;
-        currentMode  = MODE_NORMAL;
+        // Return to NORMAL
+        if (previousMode == MODE_NORMAL) {
+            previousMode = currentMode;
+            currentMode  = MODE_NORMAL;
 
-        // Sample pots for NORMAL mode
-        int rawDutyADC = analogRead(DUTY_POT_PIN);
-        float dutyNorm = (rawDutyADC - DUTY_MIN_RAW) /
-                        float(DUTY_MAX_RAW - DUTY_MIN_RAW);
-        dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
+            // Sample pots for NORMAL mode
+            int rawDutyADC = analogRead(DUTY_POT_PIN);
+            float dutyNorm = (rawDutyADC - DUTY_MIN_RAW) /
+                             float(DUTY_MAX_RAW - DUTY_MIN_RAW);
+            dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
 
-        int idx = (int)round(dutyNorm * (NORMAL_STEPS - 1));
-        idx = constrain(idx, 0, NORMAL_STEPS - 1);
+            int idx = round(dutyNorm * (NORMAL_STEPS - 1));
+            idx = constrain(idx, 0, NORMAL_STEPS - 1);
+            float newB = normalBrightnessSteps[idx];
 
-        targetBrightness  = normalBrightnessSteps[idx];
-        currentBrightness = targetBrightness;   // <-- REQUIRED
+            int rawCCTADC = analogRead(CCT_POT_PIN);
+            float norm = (rawCCTADC - CCT_MIN_RAW) /
+                         float(CCT_MAX_RAW - CCT_MIN_RAW);
+            norm = constrain(norm, 0.0f, 1.0f);
 
-        int rawCCTADC = analogRead(CCT_POT_PIN);
-        float norm = (rawCCTADC - CCT_MIN_RAW) /
-                    float(CCT_MAX_RAW - CCT_MIN_RAW);
-        norm = constrain(norm, 0.0f, 1.0f);
+            float rawCCT = 2700.0f + norm * (6500.0f - 2700.0f);
+            int stepIndex = round((rawCCT - 2700.0f) / 100.0f);
+            stepIndex = constrain(stepIndex, 0, 38);
+            float newC = 2700.0f + stepIndex * 100.0f;
 
-        float rawCCT = 2700.0f + norm * (6500.0f - 2700.0f);
-        int stepIndex = (int)round((rawCCT - 2700.0f) / 100.0f);
-        stepIndex = constrain(stepIndex, 0, 38);
+            ledmix_set(newB, newC);
+            applyLEDsImmediate(newB, newC);
 
-        targetCCT  = 2700.0f + stepIndex * 100.0f;
-        currentCCT = targetCCT;                 // <-- REQUIRED
-
-        applyLEDsImmediate(currentBrightness, currentCCT);
-
-        if (systemInitialized) {
-            buzzerModeChangeBeep();
-            buzzerQuietUntil = millis() + 200;
+            if (systemInitialized) {
+                buzzerModeChangeBeep();
+                buzzerQuietUntil = millis() + 200;
+            }
+            return;
         }
-        return;
-    }
 
         // Return to OVERRIDE+
         if (previousMode == MODE_CAL) {
@@ -214,7 +209,7 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
                              float(DUTY_MAX_RAW - DUTY_MIN_RAW);
             dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
 
-            int idx = (int)round(dutyNorm * 19.0f);
+            int idx = round(dutyNorm * 19.0f);
             idx = constrain(idx, 0, 19);
 
             const float overrideBrightnessSteps[20] = {
@@ -223,13 +218,15 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
                 0.012f, 0.013f, 0.014f, 0.015f, 0.016f,
                 0.017f, 0.018f, 0.019f, 0.020f, 0.020f
             };
-            targetBrightness = overrideBrightnessSteps[idx];
+            float newB = overrideBrightnessSteps[idx];
 
             int rawCCTADC = analogRead(CCT_POT_PIN);
             int cidx = map(rawCCTADC, CCT_MIN_RAW, CCT_MAX_RAW, 0, 4);
             cidx = constrain(cidx, 0, 4);
             calPresetIndex = cidx;
-            targetCCT           = calPresets[cidx];
+            float newC = calPresets[cidx];
+
+            ledmix_set(newB, newC);
 
             if (systemInitialized) {
                 buzzerModeChangeBeep();
@@ -242,7 +239,7 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
         if (previousMode == MODE_DEMO) {
             currentMode = MODE_DEMO;
             demoJustResumed = true;
-            
+
             if (systemInitialized) {
                 buzzerModeChangeBeep();
                 buzzerQuietUntil = millis() + 200;
@@ -253,17 +250,14 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
         // Default: STANDBY → NORMAL
         currentMode = MODE_NORMAL;
 
-        // Do not reset pot tracking — let fade engine handle the transition
-
-        // Sample pots for NORMAL mode
         int rawDutyADC = analogRead(DUTY_POT_PIN);
         float dutyNorm = (rawDutyADC - DUTY_MIN_RAW) /
                          float(DUTY_MAX_RAW - DUTY_MIN_RAW);
         dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
 
-        int idx = (int)round(dutyNorm * (NORMAL_STEPS - 1));
+        int idx = round(dutyNorm * (NORMAL_STEPS - 1));
         idx = constrain(idx, 0, NORMAL_STEPS - 1);
-        targetBrightness = normalBrightnessSteps[idx];
+        float newB = normalBrightnessSteps[idx];
 
         int rawCCTADC = analogRead(CCT_POT_PIN);
         float norm = (rawCCTADC - CCT_MIN_RAW) /
@@ -271,9 +265,11 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
         norm = constrain(norm, 0.0f, 1.0f);
 
         float rawCCT = 2700.0f + norm * (6500.0f - 2700.0f);
-        int stepIndex = (int)round((rawCCT - 2700.0f) / 100.0f);
+        int stepIndex = round((rawCCT - 2700.0f) / 100.0f);
         stepIndex = constrain(stepIndex, 0, 38);
-        targetCCT = 2700.0f + stepIndex * 100.0f;
+        float newC = 2700.0f + stepIndex * 100.0f;
+
+        ledmix_set(newB, newC);
 
         if (systemInitialized) {
             buzzerModeChangeBeep();
@@ -284,18 +280,18 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
 
     // OVERRIDE → cycle CCT presets
     if (currentMode == MODE_FREQ) {
-        float c = targetCCT;
+        float c = ledmix_getCCT();
 
         if (c >= 4550.0f && c <= 4650.0f) {
-            targetCCT = 2700.0f;
+            ledmix_set(ledmix_getBrightness(), 2700.0f);
         } else if (c >= 2650.0f && c <= 2750.0f) {
-            targetCCT = 3800.0f;
+            ledmix_set(ledmix_getBrightness(), 3800.0f);
         } else if (c >= 3750.0f && c <= 3850.0f) {
-            targetCCT = 5000.0f;
+            ledmix_set(ledmix_getBrightness(), 5000.0f);
         } else if (c >= 4950.0f && c <= 5050.0f) {
-            targetCCT = 6500.0f;
+            ledmix_set(ledmix_getBrightness(), 6500.0f);
         } else {
-            targetCCT = 4600.0f;
+            ledmix_set(ledmix_getBrightness(), 4600.0f);
         }
 
         if (systemInitialized) {
@@ -307,9 +303,10 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
 
     // OVERRIDE+ → STANDBY
     if (currentMode == MODE_CAL) {
-        previousMode     = currentMode;
-        currentMode      = MODE_STANDBY;
-        targetBrightness = 0.0f;
+        previousMode = currentMode;
+        currentMode  = MODE_STANDBY;
+
+        ledmix_set(0.0f, ledmix_getCCT());
 
         if (systemInitialized) {
             buzzerModeChangeBeep();
@@ -320,9 +317,10 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
 
     // DEMO → STANDBY
     if (currentMode == MODE_DEMO) {
-        previousMode     = currentMode;
-        currentMode      = MODE_STANDBY;
-        targetBrightness = 0.0f;
+        previousMode = currentMode;
+        currentMode  = MODE_STANDBY;
+
+        ledmix_set(0.0f, ledmix_getCCT());
 
         if (systemInitialized) {
             buzzerModeChangeBeep();
@@ -359,7 +357,6 @@ void handleDispButtonRelease(unsigned long heldMs) {
             demoPhaseIndex      = 0;
             demoPhaseStartTime  = millis();
             demoJustResumed     = true;
-            
         }
         if (systemInitialized) {
             buzzerModeChangeBeep();
@@ -407,28 +404,29 @@ void handleMainLongPress() {
     // NORMAL → FREQ
     if (currentMode == MODE_NORMAL) {
         previousMode = currentMode;
-        currentMode = MODE_FREQ;
-        freqCycleStartTime = 0; // reset strobe cycle
+        currentMode  = MODE_FREQ;
+        freqCycleStartTime = 0;
         return;
     }
 
     // FREQ → NORMAL
     if (currentMode == MODE_FREQ) {
         previousMode = currentMode;
-        currentMode = MODE_NORMAL;
+        currentMode  = MODE_NORMAL;
         return;
     }
 
+    // NORMAL → OVERRIDE+
     if (currentMode == MODE_NORMAL) {
         previousMode = currentMode;
-        currentMode  = MODE_FREQ;
+        currentMode  = MODE_CAL;
 
         int rawDutyADC = analogRead(DUTY_POT_PIN);
         float dutyNorm = (rawDutyADC - DUTY_MIN_RAW) /
                          float(DUTY_MAX_RAW - DUTY_MIN_RAW);
         dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
 
-        int idx = (int)round(dutyNorm * 19.0f);
+        int idx = round(dutyNorm * 19.0f);
         idx = constrain(idx, 0, 19);
 
         const float overrideBrightnessSteps[20] = {
@@ -437,15 +435,19 @@ void handleMainLongPress() {
             0.012f, 0.013f, 0.014f, 0.015f, 0.016f,
             0.017f, 0.018f, 0.019f, 0.020f, 0.020f
         };
-        targetBrightness = overrideBrightnessSteps[idx];
+        float newB = overrideBrightnessSteps[idx];
 
         calPresetIndex = 2;
-        targetCCT           = calPresets[calPresetIndex];
+        float newC = calPresets[calPresetIndex];
 
-    } else if (currentMode == MODE_FREQ ||
-               currentMode == MODE_CAL ||
-               currentMode == MODE_DEMO ||
-               currentMode == MODE_STANDBY) {
+        ledmix_set(newB, newC);
+    }
+
+    // OVERRIDE+ → NORMAL
+    else if (currentMode == MODE_FREQ ||
+             currentMode == MODE_CAL ||
+             currentMode == MODE_DEMO ||
+             currentMode == MODE_STANDBY) {
         previousMode = currentMode;
         currentMode  = MODE_NORMAL;
     }
@@ -483,6 +485,7 @@ void handleMainShortLongCombo() {
         return;
     }
 
+    // NORMAL → OVERRIDE+
     if (currentMode == MODE_NORMAL) {
         previousMode = currentMode;
         currentMode  = MODE_CAL;
@@ -492,7 +495,7 @@ void handleMainShortLongCombo() {
                          float(DUTY_MAX_RAW - DUTY_MIN_RAW);
         dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
 
-        int bIdx = (int)round(dutyNorm * 19.0f);
+        int bIdx = round(dutyNorm * 19.0f);
         bIdx = constrain(bIdx, 0, 19);
 
         const float overrideBrightnessSteps[20] = {
@@ -501,15 +504,19 @@ void handleMainShortLongCombo() {
             0.012f, 0.013f, 0.014f, 0.015f, 0.016f,
             0.017f, 0.018f, 0.019f, 0.020f, 0.020f
         };
-        targetBrightness = overrideBrightnessSteps[bIdx];
+        float newB = overrideBrightnessSteps[bIdx];
 
         int rawCCTADC = analogRead(CCT_POT_PIN);
         int cIdx = map(rawCCTADC, CCT_MIN_RAW, CCT_MAX_RAW, 0, 4);
         cIdx = constrain(cIdx, 0, 4);
         calPresetIndex = cIdx;
-        targetCCT           = calPresets[cIdx];
+        float newC = calPresets[cIdx];
 
-    } else if (currentMode == MODE_CAL) {
+        ledmix_set(newB, newC);
+    }
+
+    // OVERRIDE+ → NORMAL
+    else if (currentMode == MODE_CAL) {
         previousMode = currentMode;
         currentMode  = MODE_NORMAL;
     }
@@ -563,7 +570,6 @@ void handleDispShortLongCombo() {
         demoPhaseIndex      = 0;
         demoPhaseStartTime  = millis();
         demoJustResumed     = true;
-        
 
         int rawDutyADC = analogRead(DUTY_POT_PIN);
         int idx = map(rawDutyADC, DUTY_MIN_RAW, DUTY_MAX_RAW, 0, 6);
@@ -578,7 +584,9 @@ void handleDispShortLongCombo() {
             0.20f,
             0.25f
         };
-        targetBrightness = demoSteps[idx];
+        float newB = demoSteps[idx];
+
+        ledmix_set(newB, ledmix_getCCT());
     }
 
     if (systemInitialized) {
@@ -591,8 +599,7 @@ void handleDispShortLongCombo() {
 //  MODE STATE UPDATE (NO-OP)
 // =====================================================
 void updateModeState(unsigned long now) {
-    // Do NOT block state transitions for DUMB mode
-    // This was preventing previousMode from updating correctly
+    // No blocking logic here
 }
 
 // =====================================================
@@ -610,13 +617,17 @@ void updateModeBehavior(unsigned long now) {
             demoPhaseIndex     = (demoPhaseIndex + 1) % 4;
             demoPhaseStartTime = now;
         }
-        targetCCT = demoTargets[demoPhaseIndex];
 
-        if (targetBrightness > 0.25f) targetBrightness = 0.25f;
-        if (targetBrightness < min_duty) targetBrightness = min_duty;
+        float newC = demoTargets[demoPhaseIndex];
+        float newB = ledmix_getBrightness();
+
+        if (newB > 0.25f) newB = 0.25f;
+        if (newB < min_duty) newB = min_duty;
+
+        ledmix_set(newB, newC);
     }
 
     if (currentMode == MODE_STANDBY) {
-        targetBrightness = 0.0f;
+        ledmix_set(0.0f, ledmix_getCCT());
     }
 }

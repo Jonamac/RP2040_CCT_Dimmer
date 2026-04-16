@@ -1,8 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-extern int lastCCTADC;
-extern int lastDutyADC;
+int readADC(int pin);
 
 void readInputs(unsigned long now);
 void processButtons(unsigned long now);

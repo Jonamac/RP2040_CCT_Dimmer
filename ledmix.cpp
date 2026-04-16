@@ -1,24 +1,49 @@
 #include "ledmix.h"
 #include "brightness_table.h"
 
-float applyGamma(float v) {
-  if (v <= 0) return 0;
-  if (v >= 1) return 1;
-  return powf(v, gamma_val);
+// ============================================================
+// Internal LED engine state
+// ============================================================
+static float led_currentBrightness = 0.0f;
+static float led_currentCCT        = 4600.0f;
+
+static float led_targetBrightness  = 0.0f;
+static float led_targetCCT         = 4600.0f;
+
+static float lastWarmDuty = 0.0f;
+static float lastCoolDuty = 0.0f;
+
+// ============================================================
+// Public getters
+// ============================================================
+float ledmix_getBrightness() { return led_currentBrightness; }
+float ledmix_getCCT()        { return led_currentCCT; }
+
+// ============================================================
+// Public setter — called by pots.cpp
+// ============================================================
+void ledmix_set(float brightness, float cct)
+{
+    led_targetBrightness = brightness;
+    led_targetCCT        = cct;
 }
 
-void applyLEDsImmediate(float brightness, float cct) {
-    //DEBUG, for finding the values stored in calibration.cpp (DUTY_MIN_RAW, DUTY_MAX_RAW, CCT_MIN_RAW, CCT_MAX_RAW)
-    // Serial.print("MODE=");
-    // Serial.print(currentMode);
-    // Serial.print("  B_in=");
-    // Serial.print(brightness, 6);
-    // Serial.print("  CCT=");
-    // Serial.println(cct);
-    // 1. Clamp input brightness to [0,1]
+// ============================================================
+// Gamma correction
+// ============================================================
+float applyGamma(float v)
+{
+    if (v <= 0) return 0;
+    if (v >= 1) return 1;
+    return powf(v, gamma_val);
+}
 
-
-    // 1. Clamp brightness
+// ============================================================
+// Immediate LED application (gamma + mixing + PWM)
+// ============================================================
+void applyLEDsImmediate(float brightness, float cct)
+{
+    // Clamp brightness
     if (brightness <= 0.0f) {
         setWarmDuty(0.0f);
         setCoolDuty(0.0f);
@@ -26,18 +51,14 @@ void applyLEDsImmediate(float brightness, float cct) {
     }
     if (brightness > 1.0f) brightness = 1.0f;
 
-    // 2. Gamma usage
     bool useGamma =
         !(currentMode == MODE_FREQ || currentMode == MODE_CAL);
 
-    float B_linear      = brightness;
-    float B_perceptual  = useGamma ? applyGamma(B_linear) : B_linear;
+    float B_linear     = brightness;
+    float B_perceptual = useGamma ? applyGamma(B_linear) : B_linear;
 
-    // 3. Effective-off threshold (NOT used in DUMB mode)
-    // DUMB MODE must NEVER use effective-off threshold
-    if (currentMode == MODE_DUMB) {
-        // skip cutoff logic entirely
-    } else {
+    // Effective-off threshold (not in DUMB mode)
+    if (currentMode != MODE_DUMB) {
         if (B_perceptual < effective_off_threshold) {
             setWarmDuty(0.0f);
             setCoolDuty(0.0f);
@@ -45,10 +66,9 @@ void applyLEDsImmediate(float brightness, float cct) {
         }
     }
 
-    // 4. Compute CCT mix
+    // CCT mix
     float t = (cct - 2700.0f) / (6500.0f - 2700.0f);
-    if (t < 0) t = 0;
-    if (t > 1) t = 1;
+    t = constrain(t, 0.0f, 1.0f);
 
     float wCool = t;
     float wWarm = 1.0f - t;
@@ -57,14 +77,13 @@ void applyLEDsImmediate(float brightness, float cct) {
     float dutyCool_lin = 0.0f;
 
     // ============================================================
-    //  DUMB MODE — CORRECT, FINAL, SINGLE IMPLEMENTATION
+    // DUMB MODE — raw analog behavior
     // ============================================================
-    if (currentMode == MODE_DUMB) {
-
+    if (currentMode == MODE_DUMB)
+    {
         float mix = t;
 
         if (B_linear <= min_duty) {
-            // Minimum brightness behavior
             if (mix == 0.0f) {
                 dutyWarm_lin = min_duty;
                 dutyCool_lin = 0.0f;
@@ -76,7 +95,6 @@ void applyLEDsImmediate(float brightness, float cct) {
                 dutyCool_lin = min_duty;
             }
         } else {
-            // Above min_duty
             if (mix == 0.0f) {
                 dutyWarm_lin = B_linear;
                 dutyCool_lin = 0.0f;
@@ -89,23 +107,13 @@ void applyLEDsImmediate(float brightness, float cct) {
                 dutyCool_lin = min_duty + extra * mix;
             }
         }
-
-        // DEBUG
-        Serial.print("APPLY[DUMB]: B_in=");
-        Serial.print(brightness, 6);
-        Serial.print(" CCT=");
-        Serial.print(cct);
-        Serial.print(" W_lin=");
-        Serial.print(dutyWarm_lin, 6);
-        Serial.print(" C_lin=");
-        Serial.println(dutyCool_lin, 6);
-
     }
-    // ============================================================
-    //  NORMAL / DEMO / STANDBY / OVERRIDE
-    // ============================================================
-    else {
 
+    // ============================================================
+    // NORMAL / DEMO / STANDBY / OVERRIDE
+    // ============================================================
+    else
+    {
         int active = (wWarm > 0 ? 1 : 0) + (wCool > 0 ? 1 : 0);
         float reserved = active * min_duty;
 
@@ -122,147 +130,97 @@ void applyLEDsImmediate(float brightness, float cct) {
             dutyWarm_lin = (wWarm > 0) ? min_duty * scale : 0;
             dutyCool_lin = (wCool > 0) ? min_duty * scale : 0;
         }
-
-        // DEBUG
-        Serial.print("APPLY[NORM]: B_in=");
-        Serial.print(brightness, 6);
-        Serial.print(" CCT=");
-        Serial.print(cct);
-        Serial.print(" W_lin=");
-        Serial.print(dutyWarm_lin, 6);
-        Serial.print(" C_lin=");
-        Serial.println(dutyCool_lin, 6);
     }
 
-    // ============================================================
-    //  6. Apply perceptual scaling (gamma)
-    // ============================================================
+    // Gamma scaling
     float scale = useGamma ? (B_perceptual / B_linear) : 1.0f;
 
     float dutyWarm = dutyWarm_lin * scale;
     float dutyCool = dutyCool_lin * scale;
 
+    lastWarmDuty = dutyWarm;
+    lastCoolDuty = dutyCool;
+
     setWarmDuty(dutyWarm);
     setCoolDuty(dutyCool);
 }
 
-float brightnessTableLookup(float norm) {
-    // Use your existing brightness table
+// ============================================================
+// Brightness table lookup
+// ============================================================
+float brightnessTableLookup(float norm)
+{
     int idx = round(norm * (BRIGHTNESS_STEPS - 1));
     idx = constrain(idx, 0, BRIGHTNESS_STEPS - 1);
     return brightnessTable[idx];
 }
 
-void updateLEDLogic(unsigned long now) {
-    //debug
-    Serial.print("DUMB FADE: mode=");
-    Serial.print((int)currentMode);
-    Serial.print(" t=");
-    Serial.print((float)(now - dumbFadeStartTime) / (float)dumbFadeDuration, 3);
-    Serial.print(" B=");
-    Serial.println(currentBrightness, 4);
-
-    unsigned long elapsed = now - dumbFadeStartTime;
-    float t = (float)elapsed / (float)dumbFadeDuration;
-    // 1) Dedicated DUMB fade handler (runs regardless of mode)
-    if (dumbFadeActive) {
-        unsigned long elapsed;
-        if (now >= dumbFadeStartTime) {
-            elapsed = now - dumbFadeStartTime;
-        } else {
-            elapsed = 0;  // guard against underflow
-        }
+// ============================================================
+// LED engine update — DUMB fade + FREQ strobe
+// ============================================================
+void updateLEDLogic(unsigned long now)
+{
+    // ---------------------------
+    // DUMB fade engine
+    // ---------------------------
+    if (dumbFadeActive)
+    {
+        unsigned long elapsed =
+            (now >= dumbFadeStartTime) ? (now - dumbFadeStartTime) : 0;
 
         float t = (float)elapsed / (float)dumbFadeDuration;
         if (t > 1.0f) t = 1.0f;
 
         float newB = dumbFadeStartB + (dumbFadeEndB - dumbFadeStartB) * t;
 
-        currentBrightness = newB;
-        applyLEDsImmediate(currentBrightness, currentCCT);
+        led_currentBrightness = newB;
+        applyLEDsImmediate(led_currentBrightness, led_currentCCT);
 
-        if (t >= 1.0f) {
+        if (t >= 1.0f)
             dumbFadeActive = false;
-        }
+
         return;
     }
 
-    // 2) DUMB mode (no generic fade when not in a DUMB-specific fade)
-    if (currentMode == MODE_DUMB) {
-        return;
-    }
+    // ---------------------------
+    // FREQ strobe engine
+    // ---------------------------
+    if (currentMode == MODE_FREQ)
+    {
+        unsigned long nowMs = millis();
 
-    // =====================
-    // FREQ MODE STROBE ENGINE
-    // =====================
-    if (currentMode == MODE_FREQ) {
-
-        unsigned long now = millis();
-
-        // Initialize cycle start
         if (freqCycleStartTime == 0) {
-            freqCycleStartTime = now;
+            freqCycleStartTime = nowMs;
             freqOnPhase = true;
         }
 
         float periodMs = 1000.0f / freqStrobeHz;
-        float onMs = periodMs * freqDutyCycle;
+        float onMs     = periodMs * freqDutyCycle;
 
-        unsigned long elapsed = now - freqCycleStartTime;
+        unsigned long elapsed = nowMs - freqCycleStartTime;
 
-        // Wrap cycle
         if (elapsed >= periodMs) {
-            freqCycleStartTime = now;
+            freqCycleStartTime = nowMs;
             elapsed = 0;
         }
 
-        // Determine phase
         bool onNow = (elapsed < onMs);
 
-        float effectiveB = onNow ? currentBrightness : 0.0f;
+        float effectiveB = onNow ? led_targetBrightness : 0.0f;
 
-        applyLEDsImmediate(effectiveB, currentCCT);
+        led_currentBrightness = effectiveB;
+        applyLEDsImmediate(led_currentBrightness, led_currentCCT);
         return;
     }
 
-    // 3) Generic fade engine for all non-DUMB modes
-    if (lastLEDUpdateTime == 0) {
-        lastLEDUpdateTime = now;
-        return;
-    }
+    // ---------------------------
+    // NORMAL / DEMO / STANDBY
+    // ---------------------------
+    led_currentBrightness = led_targetBrightness;
+    led_currentCCT        = led_targetCCT;
 
-    unsigned long dt = now - lastLEDUpdateTime;
-    if (dt == 0) return;
-    lastLEDUpdateTime = now;
-
-    float fadeMs;
-    if (currentMode == MODE_STANDBY) {
-        fadeMs = standby_fade_time_ms;
-    } else if (currentMode == MODE_FREQ || currentMode == MODE_CAL) {
-        fadeMs = fade_time_ms / 2.0f;
-    } else {
-        fadeMs = fade_time_ms;
-    }
-
-    float step = (float)dt / (float)fadeMs;
-    if (step > 1.0f) step = 1.0f;
-
-    float newB = currentBrightness + (targetBrightness - currentBrightness) * step;
-    float newC = currentCCT + (targetCCT - currentCCT) * step;
-
-    if (fabs(newB - targetBrightness) < 0.0005f) newB = targetBrightness;
-    if (fabs(newC - targetCCT)      < 0.1f)     newC = targetCCT;
-
-    if (fabs(newB - currentBrightness) < 0.0001f &&
-        fabs(newC - currentCCT)        < 0.1f) {
-        return;
-    }
-
-    currentBrightness = newB;
-    currentCCT        = newC;
-
-    applyLEDsImmediate(currentBrightness, currentCCT);
+    applyLEDsImmediate(led_currentBrightness, led_currentCCT);
 }
-// Temporarily disable LED update beeps to avoid long/late buzzing
-// We'll reintroduce a single "done" chirp later if desired.
-// buzzerLEDUpdateBeep();
+
+float ledmix_getWarmDuty() { return lastWarmDuty; }
+float ledmix_getCoolDuty() { return lastCoolDuty; }

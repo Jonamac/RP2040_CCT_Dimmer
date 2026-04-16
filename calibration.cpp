@@ -1,9 +1,9 @@
 #include "calibration.h"
 
-const int DUTY_MIN_RAW = 22;
+const int DUTY_MIN_RAW = 15;
 const int DUTY_MAX_RAW = 4095;
 
-const int CCT_MIN_RAW  = 22;
+const int CCT_MIN_RAW  = 15;
 const int CCT_MAX_RAW  = 4095;
 
 const int NORMAL_STEPS = 22;

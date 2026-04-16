@@ -9,6 +9,7 @@ void initDisplay();
 void toggleDisplay();
 void updateDisplayLogic(unsigned long now);
 void showStatusFlash(const char* text, int times, int ms);
+void demoModeSetSpeedIndex(int idx);
 
 extern unsigned long demoSpeedFlashUntil;
 extern int demoSpeedPercent;

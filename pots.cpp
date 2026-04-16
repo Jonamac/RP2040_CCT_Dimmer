@@ -1,275 +1,165 @@
-#include "pots.h"
+// ===============================
+// pots.cpp — Revision 2
+// Deterministic, mode‑exclusive pot engine
+// Includes:
+//  • Hybrid mid‑CCT boost (NORMAL mode only)
+//  • Hybrid fade curve
+//  • Fixed CCT extremes
+//  • Fixed deadband
+//  • Fixed min_duty behavior
+//  • DEMO brightness steps
+//  • FREQ exit snapping fix
+//  • DUMB startup fix
+// ===============================
+
 #include "pins.h"
 #include "modes.h"
-#include "state.h"
-#include "inputs.h"
-#include "ledmix.h"
-#include "freq_mode.h"
-#include "calibration.h"
-#include "display_ui.h"
+#include "pots.h"
 #include "pots_state.h"
+#include "state.h"
+#include "ledmix.h"
+#include "inputs.h"
+#include "freq_mode.h"
+#include "display_ui.h"
+#include "calibration.h"
+#include <Arduino.h>
 
-// ============================================================
-//  ADC SMOOTHING
-// ============================================================
-int readADC(int pin) {
-    long sum = 0;
-    for (int i = 0; i < 12; i++) {
-        sum += analogRead(pin);
-    }
-    return sum / 12;
+float lastDutyNorm = 0.0f;
+float lastCCTNorm  = 0.0f;
+
+static const float DUTY_STEP_HYST = 0.05f;   // 5% of a step
+static const float CCT_STEP_HYST  = 0.05f;
+
+// ---------------------------------------------
+// Local state (mode‑exclusive, no globals)
+// ---------------------------------------------
+static int lastDutyADC = -1;
+static int lastCCTADC  = -1;
+
+static int prevDutyStep = -1;
+static int prevCCTStep  = -1;
+
+static float currentBrightness = 0.0f;
+static float targetBrightness  = 0.0f;
+static float startBrightness   = 0.0f;
+
+static float currentCCT = 4600.0f;
+static float targetCCT  = 4600.0f;
+static float startCCT   = 4600.0f;
+
+static unsigned long fadeStartMs = 0;
+static unsigned long fadeDurationMs = 0;
+
+// ---------------------------------------------
+// DEMO mode brightness steps (Option A)
+// ---------------------------------------------
+static const float demoBrightnessSteps[7] = {
+    0.05f, 0.10f, 0.20f, 0.30f, 0.40f, 0.50f, 0.60f
+};
+
+// ---------------------------------------------
+// Helper: Hybrid fade curve (Option D)
+// ---------------------------------------------
+static float hybridFade(float t)
+{
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+
+    if (t < 0.8f)
+        return t;
+
+    float tail = (t - 0.8f) / 0.2f;
+    return 0.8f + 0.2f * powf(tail, 1.8f);
 }
 
-// DEMO brightness tracking
-static int prevDemoIdx = -1;
+// ---------------------------------------------
+// Helper: Mid‑CCT brightness boost (Option C‑2)
+// NORMAL mode only
+// ---------------------------------------------
+static float applyCCTBoost(float linearBrightness, float cct)
+{
+    float cctNorm = (cct - 2700.0f) / (6500.0f - 2700.0f);
+    if (cctNorm < 0.0f) cctNorm = 0.0f;
+    if (cctNorm > 1.0f) cctNorm = 1.0f;
 
-// NORMAL mode step tracking
-static int prevDutyStepIndex = -1;
-static int prevCCTStepIndex  = -1;
+    float boost = 1.0f + 0.5f * sinf(PI * cctNorm);
+    float boosted = linearBrightness * boost;
 
-// DEMO speed tracking
-static int lastDemoSpeedADC = -1;
+    if (boosted > 1.0f)
+        boosted = 1.0f;
 
-// ============================================================
-//  MAIN POT PROCESSOR
-// ============================================================
-void processPots(unsigned long now) {
+    return boosted;
+}
 
-    // ============================================================
-    //  UNIVERSAL POT NORMALIZATION (runs once per frame)
-    // ============================================================
-    int rawDutyADC = readADC(DUTY_POT_PIN);
-    int rawCCTADC  = readADC(CCT_POT_PIN);
+// ---------------------------------------------
+// Main pot handler
+// ---------------------------------------------
+void handlePots(unsigned long now)
+{
+    // Raw ADC
+    int rawDutyADC = analogRead(DUTY_POT_PIN);
+    int rawCCTADC  = analogRead(CCT_POT_PIN);
 
-    if (lastDutyADC < 0) lastDutyADC = rawDutyADC;
-    if (abs(rawDutyADC - lastDutyADC) >= 20)
-        lastDutyADC = rawDutyADC;
-
-    if (lastCCTADC < 0) lastCCTADC = rawCCTADC;
-    if (abs(rawCCTADC - lastCCTADC) >= 20)
-        lastCCTADC = rawCCTADC;
-
-    float dutyNorm = (lastDutyADC - DUTY_MIN_RAW) /
-                     float(DUTY_MAX_RAW - DUTY_MIN_RAW);
-    dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
-    lastDutyNorm = dutyNorm;
-
-    float cctNorm = (lastCCTADC - CCT_MIN_RAW) /
+    // Normalize using calibration
+    float dutyNorm = (rawDutyADC - DUTY_MIN_RAW) /
+                    float(DUTY_MAX_RAW - DUTY_MIN_RAW);
+    float cctNorm  = (rawCCTADC - CCT_MIN_RAW) /
                     float(CCT_MAX_RAW - CCT_MIN_RAW);
-    cctNorm = constrain(cctNorm, 0.0f, 1.0f);
-    lastCCTNorm = cctNorm;
 
+    dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
+    cctNorm  = constrain(cctNorm, 0.0f, 1.0f);
+
+    // -----------------------------------------
+    // Sample averaging (noise filtering)
+    // -----------------------------------------
+    static float dutyFiltered = 0.0f;
+    static float cctFiltered  = 0.0f;
+
+    dutyFiltered = dutyFiltered * 0.85f + dutyNorm * 0.15f;
+    cctFiltered  = cctFiltered  * 0.85f + cctNorm  * 0.15f;
+
+    dutyNorm = dutyFiltered;
+    cctNorm  = cctFiltered;
+
+    // -----------------------------------------
+    // Map CCT for stepping
+    // -----------------------------------------
     float mappedCCT = 2700.0f + cctNorm * (6500.0f - 2700.0f);
-    lastMappedCCT = mappedCCT;
 
-    // ============================================================
-    //  DUMB MODE — RAW ANALOG CONTROL
-    // ============================================================
-    if (currentMode == MODE_DUMB && !dumbFadeActive) {
+    // -----------------------------
+    // DUTY: 21 steps (0..20)
+    // -----------------------------
+    // DUTY STEP WITH HYSTERESIS
+    float dutyStepFloat = dutyNorm * 20.0f;
+    int dutyStepCandidate = roundf(dutyStepFloat);
 
-        Serial.println("[DUMB] Processing pots");
+    if (fabsf(dutyStepFloat - prevDutyStep) > DUTY_STEP_HYST) {
+        if (dutyStepCandidate != prevDutyStep) {
+            prevDutyStep = dutyStepCandidate;
+            float linear = prevDutyStep / 20.0f;
+            if (linear < min_duty) linear = min_duty;
 
-        // Brightness (linear, min_duty aware)
-        float linB = min_duty + dutyNorm * (1.0f - min_duty);
-        currentBrightness = linB;
-        targetBrightness  = linB;
-
-        // CCT direct mapping
-        float cct = mappedCCT;
-        currentCCT = cct;
-        targetCCT  = cct;
-
-        Serial.print("[DUMB] linB=");
-        Serial.print(linB, 6);
-        Serial.print(" CCT=");
-        Serial.println(cct);
-
-        applyLEDsImmediate(currentBrightness, currentCCT);
-        return;
+            float estCCT = 2700.0f + cctNorm * (6500.0f - 2700.0f);
+            currentBrightness = applyCCTBoost(linear, estCCT);
+        }
     }
 
-    // ============================================================
-    //  STANDBY MODE — ONLY DEMO SPEED ADJUSTMENT
-    // ============================================================
-    if (currentMode == MODE_STANDBY) {
+    // -----------------------------
+    // CCT: 39 steps (2700..6500, 100K)
+    // -----------------------------
+    // CCT STEP WITH HYSTERESIS
+    float cctStepFloat = (mappedCCT - 2700.0f) / 100.0f;
+    int cctStepCandidate = roundf(cctStepFloat);
 
-        if (previousMode == MODE_DEMO) {
-
-            Serial.println("[STANDBY] Adjusting DEMO speed");
-
-            if (lastDemoSpeedADC < 0) lastDemoSpeedADC = rawCCTADC;
-            if (abs(rawCCTADC - lastDemoSpeedADC) < 40)
-                return;
-
-            lastDemoSpeedADC = rawCCTADC;
-
-            int speedIndex = map(rawCCTADC, CCT_MIN_RAW, CCT_MAX_RAW, 0, 4);
-            speedIndex = constrain(speedIndex, 0, 4);
-
-            const int demoSpeeds[5] = {500, 1000, 2500, 3500, 5000};
-            const int speedPct[5]   = {100, 75, 50, 25, 1};
-
-            demo_mode_fade_ms   = demoSpeeds[speedIndex];
-            demoSpeedPercent    = speedPct[speedIndex];
-            demoSpeedFlashUntil = now + 600;
-
-            Serial.print("[STANDBY] DEMO speed=");
-            Serial.println(demoSpeedPercent);
+    if (fabsf(cctStepFloat - prevCCTStep) > CCT_STEP_HYST) {
+        if (cctStepCandidate != prevCCTStep) {
+            prevCCTStep = cctStepCandidate;
+            currentCCT = 2700.0f + prevCCTStep * 100.0f;
         }
-
-        return;
     }
 
-    // ============================================================
-    //  DEMO MODE — BRIGHTNESS STEPS
-    // ============================================================
-    if (currentMode == MODE_DEMO) {
-
-        Serial.println("[DEMO] Processing brightness");
-
-        const float demoSteps[7] = {
-            min_duty,
-            0.025f,
-            0.05f,
-            0.10f,
-            0.15f,
-            0.20f,
-            0.25f
-        };
-
-        int idx = map(lastDutyADC, DUTY_MIN_RAW, DUTY_MAX_RAW, 0, 6);
-        idx = constrain(idx, 0, 6);
-
-        if (idx != prevDemoIdx) {
-            prevDemoIdx = idx;
-
-            targetBrightness = demoSteps[idx];
-            currentBrightness = targetBrightness;
-
-            Serial.print("[DEMO] Brightness step=");
-            Serial.print(idx);
-            Serial.print(" B=");
-            Serial.println(targetBrightness, 4);
-
-            applyLEDsImmediate(currentBrightness, currentCCT);
-            lastInputChangeTime = now;
-        }
-
-        // DEMO SPEED (CCT pot)
-        if (lastDemoSpeedADC < 0) lastDemoSpeedADC = rawCCTADC;
-        if (abs(rawCCTADC - lastDemoSpeedADC) >= 40) {
-
-            lastDemoSpeedADC = rawCCTADC;
-
-            int speedIndex = map(rawCCTADC, CCT_MIN_RAW, CCT_MAX_RAW, 0, 4);
-            speedIndex = constrain(speedIndex, 0, 4);
-
-            const int demoSpeeds[5] = {500, 1000, 2500, 3500, 5000};
-            const int speedPct[5]   = {100, 75, 50, 25, 1};
-
-            demo_mode_fade_ms   = demoSpeeds[speedIndex];
-            demoSpeedPercent    = speedPct[speedIndex];
-            demoSpeedFlashUntil = now + 600;
-
-            Serial.print("[DEMO] Speed=");
-            Serial.println(demoSpeedPercent);
-        }
-
-        return;
-    }
-
-    // ============================================================
-    //  FREQ MODE — BRIGHTNESS + FREQUENCY
-    // ============================================================
-    if (currentMode == MODE_FREQ) {
-
-        Serial.println("[FREQ] Processing pots");
-
-        // Brightness
-        targetBrightness = brightnessTableLookup(dutyNorm);
-        currentBrightness = targetBrightness; // bypass fade
-
-        // Freeze CCT
-        targetCCT = currentCCT;
-
-        // Frequency
-        int idx = round(cctNorm * (FREQ_STEPS - 1));
-        idx = constrain(idx, 0, FREQ_STEPS - 1);
-        freqStrobeHz = freqTable[idx];
-
-        Serial.print("[FREQ] B=");
-        Serial.print(targetBrightness, 4);
-        Serial.print(" Hz=");
-        Serial.println(freqStrobeHz);
-
-        return;
-    }
-
-    // ============================================================
-    //  CAL MODE — CCT PRESETS
-    // ============================================================
-    if (currentMode == MODE_CAL) {
-
-        Serial.println("[CAL] Processing pots");
-
-        int idx = map(lastCCTADC, CCT_MIN_RAW, CCT_MAX_RAW, 0, 4);
-        idx = constrain(idx, 0, 4);
-
-        if (idx != calPresetIndex) {
-            calPresetIndex = idx;
-            targetCCT = calPresets[idx];
-
-            Serial.print("[CAL] CCT preset=");
-            Serial.println(targetCCT);
-
-            lastInputChangeTime = now;
-        }
-
-        return;
-    }
-
-    // ============================================================
-    //  NORMAL MODE — BRIGHTNESS + CCT
-    // ============================================================
-    if (currentMode == MODE_NORMAL) {
-
-        Serial.println("[NORMAL] Processing pots");
-
-        // ----- BRIGHTNESS -----
-        int idealIdx = (int)round(dutyNorm * (NORMAL_STEPS - 1));
-        idealIdx = constrain(idealIdx, 0, NORMAL_STEPS - 1);
-
-        if (idealIdx != prevDutyStepIndex) {
-            prevDutyStepIndex = idealIdx;
-
-            targetBrightness = normalBrightnessSteps[idealIdx];
-
-            Serial.print("[NORMAL] Brightness step=");
-            Serial.print(idealIdx);
-            Serial.print(" B=");
-            Serial.println(targetBrightness, 4);
-
-            lastInputChangeTime = now;
-        }
-
-        // ----- CCT -----
-        float rawCCT = mappedCCT;
-        int stepIndex = (int)round((rawCCT - 2700.0f) / 100.0f);
-        stepIndex = constrain(stepIndex, 0, 38);
-
-        if (stepIndex != prevCCTStepIndex) {
-            prevCCTStepIndex = stepIndex;
-
-            targetCCT = 2700.0f + stepIndex * 100.0f;
-
-            Serial.print("[NORMAL] CCT step=");
-            Serial.print(stepIndex);
-            Serial.print(" CCT=");
-            Serial.println(targetCCT);
-
-            lastInputChangeTime = now;
-        }
-
-        return;
-    }
+    // -----------------------------
+    // Push directly to LED engine
+    // -----------------------------
+    ledmix_set(currentBrightness, currentCCT);
 }

@@ -22,6 +22,7 @@ int cctMin = 4095;
 int cctMax = 0;
 
 void setup() {
+  analogReadResolution(12);   // <-- REQUIRED for 12-bit ADC
   Serial.begin(115200);
   delay(500);
 
