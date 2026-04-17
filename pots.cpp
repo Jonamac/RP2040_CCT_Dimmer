@@ -15,6 +15,7 @@
 #include "freq_mode.h"
 #include "display_ui.h"
 #include "calibration.h"
+#include "buzzer.h"
 #include <Arduino.h>
 
 float lastDutyNorm = 0.0f;
@@ -22,15 +23,19 @@ float lastCCTNorm  = 0.0f;
 
 static const float DUTY_STEP_HYST      = 0.05f;   // 5% of a step
 static const float CCT_STEP_HYST       = 0.05f;
-static const float DUMB_BRIGHTNESS_DB  = 0.001f;  // 0.1% brightness dead-band for ADC noise
+static const float DUMB_BRIGHTNESS_DB  = 0.003f;  // 0.3% brightness dead-band for ADC noise
 static const float DUMB_CCT_DB         = 5.0f;    // 5 K CCT dead-band for ADC noise
 // Snap multiplier for DUMB minimum: newB < min_duty * this → snap to min_duty.
-// 1.5× covers ADC floors up to ~dutyNorm 0.024 above calibration uncertainty.
-static const float DUMB_MIN_SNAP_MULT  = 1.5f;
+// 3.0× covers ADC floors up to ~dutyNorm 0.095 (ADC ~400 counts above DUTY_MIN_RAW).
+static const float DUMB_MIN_SNAP_MULT  = 3.0f;
 
 // IIR filter state — file-scope so syncPotsAfterBoot() can seed them
 static float dutyFiltered = -1.0f;
 static float cctFiltered  = -1.0f;
+
+// DUMB-specific IIR filter — stronger smoothing for continuous (non-stepped) output
+static float dumbDutyFiltered = -1.0f;
+static float dumbCCTFiltered  = -1.0f;
 
 // Local state
 static int prevDutyStep = -1;
@@ -73,12 +78,22 @@ void handlePots(unsigned long now)
         // Do not fight an active DUMB fade
         if (dumbFadeActive) return;
 
-        float newB = min_duty + dutyNorm * (1.0f - min_duty);
-        float newC = 2700.0f + cctNorm * (6500.0f - 2700.0f);
+        // Apply a second, stronger IIR pass for DUMB mode to suppress ADC noise.
+        // α = 0.05 means 5% new data per frame → much smoother than shared filter.
+        if (dumbDutyFiltered < 0.0f) {
+            dumbDutyFiltered = dutyNorm;
+            dumbCCTFiltered  = cctNorm;
+        } else {
+            dumbDutyFiltered = dumbDutyFiltered * 0.95f + dutyNorm * 0.05f;
+            dumbCCTFiltered  = dumbCCTFiltered  * 0.95f + cctNorm  * 0.05f;
+        }
+
+        float newB = min_duty + dumbDutyFiltered * (1.0f - min_duty);
+        float newC = 2700.0f + dumbCCTFiltered  * (6500.0f - 2700.0f);
 
         // Snap to exact endpoints to compensate for ADC mechanical limits.
         // The pot floor may not reach DUTY_MIN_RAW, giving newB slightly above
-        // min_duty. Snap any value within 1.5x min_duty to exactly min_duty.
+        // min_duty. Snap any value within 3.0x min_duty to exactly min_duty.
         // Snap anything above 0.99 to exactly 1.0.
         if (newB < min_duty * DUMB_MIN_SNAP_MULT) newB = min_duty;
         if (newB > 0.99f)           newB = 1.0f;
@@ -117,6 +132,7 @@ void handlePots(unsigned long now)
         if (dutyStepCandidate != prevDutyStep) {
             prevDutyStep      = dutyStepCandidate;
             currentBrightness = normalBrightnessSteps[prevDutyStep];
+            buzzerClick();
         }
     }
 
@@ -155,16 +171,11 @@ void syncPotsAfterBoot(float brightness, float cct)
     prevCCTStep = cctStep;
     currentCCT  = 2700.0f + cctStep * 100.0f;
 
-    // Seed IIR filters from a fresh ADC read so first handlePots() loop
-    // does not average from zero
-    int rawDutyADC = analogRead(DUTY_POT_PIN);
-    int rawCCTADC  = analogRead(CCT_POT_PIN);
-    dutyFiltered = constrain(
-        (rawDutyADC - DUTY_MIN_RAW) / float(DUTY_MAX_RAW - DUTY_MIN_RAW),
-        0.0f, 1.0f);
-    cctFiltered = constrain(
-        (rawCCTADC - CCT_MIN_RAW) / float(CCT_MAX_RAW - CCT_MIN_RAW),
-        0.0f, 1.0f);
+    // Seed IIR filters from committed step values — NOT from ADC.
+    // Seeding from ADC can land on a different step than setup() computed,
+    // causing the very first handlePots() call to snap CCT/brightness.
+    dutyFiltered = (float)prevDutyStep / (float)(NORMAL_STEPS - 1);
+    cctFiltered  = (currentCCT - 2700.0f) / (6500.0f - 2700.0f);
 
     // Also update ledmix targets to match, preventing fallthrough snap
     ledmix_set(currentBrightness, currentCCT);
