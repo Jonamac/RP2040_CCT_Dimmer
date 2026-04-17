@@ -215,38 +215,44 @@ void handlePots(unsigned long now)
 
 void syncPotsAfterBoot(float brightness, float cct)
 {
-    // Take fresh 8-sample ADC to get accurate post-fade pot positions.
-    // Boot-time ADC (16 samples, taken over the soft-start fade duration) can differ from
-    // post-fade ADC due to ADC settling at cold start. All internal state must derive from
-    // ONE reading to guarantee filter and step indices are consistent — preventing Schmitt snap.
+    // Take a fresh ADC read. The boot-time ADC (taken at cold start) can differ
+    // from the current pot position by 1 step due to RP2040 ADC settling.
+    // If syncPotsAfterBoot seeds cctFiltered from the stale boot CCT, the IIR
+    // filter converges toward the real position over ~20 frames and fires the
+    // Schmitt trigger — causing a visible CCT snap seconds after boot.
+    //
+    // INVARIANT: cctFiltered, prevCCTStep, currentCCT, and led_targetCCT must
+    // all represent the SAME CCT at the moment systemInitialized becomes true.
+    // Seeding everything from the SAME fresh ADC read guarantees this.
     int dutySum = 0, cctSum = 0;
     for (int i = 0; i < 8; i++) {
         dutySum += analogRead(DUTY_POT_PIN);
         cctSum  += analogRead(CCT_POT_PIN);
     }
-    dutyFiltered = constrain((dutySum / 8.0f - DUTY_MIN_RAW) / float(DUTY_MAX_RAW - DUTY_MIN_RAW), 0.0f, 1.0f);
-    cctFiltered  = constrain((cctSum  / 8.0f - CCT_MIN_RAW)  / float(CCT_MAX_RAW  - CCT_MIN_RAW),  0.0f, 1.0f);
+    float dutyNorm = constrain((dutySum / 8.0f - DUTY_MIN_RAW) / float(DUTY_MAX_RAW - DUTY_MIN_RAW), 0.0f, 1.0f);
+    float cctNorm  = constrain((cctSum  / 8.0f - CCT_MIN_RAW)  / float(CCT_MAX_RAW  - CCT_MIN_RAW),  0.0f, 1.0f);
 
-    // Derive step indices from the SAME normalized values that seed the filter.
-    // This is the critical invariant: filter and step indices must always agree,
-    // or the very first handlePots() call will trigger a Schmitt transition.
-    prevDutyStep      = constrain((int)roundf(dutyFiltered * (NORMAL_STEPS - 1)), 0, NORMAL_STEPS - 1);
+    // Seed IIR filters to the TRUE current pot positions (not boot-time values)
+    dutyFiltered = dutyNorm;
+    cctFiltered  = cctNorm;
+
+    // Derive step indices from the SAME normalized values that seed the filters.
+    // This guarantees the first handlePots() call sees no delta and Schmitt stays quiet.
+    prevDutyStep      = constrain((int)roundf(dutyNorm * (NORMAL_STEPS - 1)), 0, NORMAL_STEPS - 1);
     currentBrightness = normalBrightnessSteps[prevDutyStep];
-    prevCCTStep       = constrain((int)roundf(cctFiltered * 38.0f), 0, 38);
+    prevCCTStep       = constrain((int)roundf(cctNorm * 38.0f), 0, 38);
     currentCCT        = 2700.0f + prevCCTStep * 100.0f;
 
-    Serial.print("syncPotsAfterBoot ADC — DUTY raw: "); Serial.print(dutySum / 8);
-    Serial.print(" | CCT raw: "); Serial.println(cctSum / 8);
-    Serial.print("  → dutyFiltered: "); Serial.print(dutyFiltered, 4);
-    Serial.print(" | cctFiltered: "); Serial.println(cctFiltered, 4);
-    Serial.print("  → prevDutyStep: "); Serial.print(prevDutyStep);
-    Serial.print(" | prevCCTStep: "); Serial.println(prevCCTStep);
-
-    // Update ledmix to the derived values.
-    // If post-boot ADC differs from boot-time ADC, this may shift CCT/brightness
-    // at the moment the fade ends — but this is unavoidable and far less visible
-    // than a snap one frame later in handlePots().
+    // Update ledmix targets. ledmix.cpp will call ledmix_initCurrent() and
+    // applyLEDsImmediate() immediately after this returns, rendering the
+    // corrected CCT/brightness before returning from updateLEDLogic.
     ledmix_set(currentBrightness, currentCCT);
+
+    Serial.print("syncPotsAfterBoot — dutyNorm: "); Serial.print(dutyNorm, 4);
+    Serial.print(" | cctNorm: "); Serial.print(cctNorm, 4);
+    Serial.print(" | prevDutyStep: "); Serial.print(prevDutyStep);
+    Serial.print(" | prevCCTStep: "); Serial.println(prevCCTStep);
+    Serial.print("  cctFiltered seeded to: "); Serial.println(cctFiltered, 4);
 }
 
 void resetDumbFilter()

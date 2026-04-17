@@ -1,7 +1,7 @@
 # AI Notes — RP2040 CCT Dimmer
 
 Long-term memory file for AI assistants working on this codebase.
-Last updated: 2026-04-17
+Last updated: 2026-04-17 (boot CCT snap definitive fix)
 
 ---
 
@@ -91,14 +91,14 @@ Last updated: 2026-04-17
 - DUMB-specific IIR: `dumbDutyFiltered`, `dumbCCTFiltered`, adaptive α (**0.05 settled** / 0.40 moving, threshold delta > 0.005) — applied to **raw (pre-shared-IIR) ADC normalized values**, NOT to shared filter output
 - All four filters are **file-scope statics** in `pots.cpp` — NOT static locals inside `handlePots()`
 - `rawDutyNorm` / `rawCCTNorm`: local variables saved immediately after `constrain` in `handlePots()`, before the shared IIR block overwrites `dutyNorm`/`cctNorm` — these are the DUMB IIR inputs
-- `syncPotsAfterBoot(brightness, cct)`: called when NORMAL boot fade completes. Takes a fresh 8-sample ADC average, seeds `dutyFiltered`/`cctFiltered` from it, then **re-derives `prevDutyStep`/`prevCCTStep` from those same normalized values**. This invariant — filter and step indices derived from one ADC sample — ensures the first `handlePots()` call sees delta ≈ 0 → slow alpha → Schmitt trigger cannot fire immediately → no boot snap.
+- `syncPotsAfterBoot(brightness, cct)`: called when NORMAL boot fade completes. Takes a fresh 8-sample ADC average, computes `dutyNorm`/`cctNorm`, seeds `dutyFiltered`/`cctFiltered` from those values, then **re-derives `prevDutyStep`/`prevCCTStep` from those same `dutyNorm`/`cctNorm` variables**. This invariant — filter and step indices derived from one ADC sample via the same intermediate normalized values — ensures the first `handlePots()` call sees delta ≈ 0 → slow alpha → Schmitt trigger cannot fire immediately → no boot snap. Then calls `ledmix_set(currentBrightness, currentCCT)` to update ledmix targets before returning.
 - `resetDumbFilter()`: resets `dumbDutyFiltered` and `dumbCCTFiltered` to -1 sentinel; called on NORMAL→DUMB switch
 - `prevDutyStep`, `prevCCTStep` initialised to -1 (sentinel for first-call)
 
 ## Known Issues / History
 
 - Pre-startup LED flash: LEDs sometimes flash briefly at power-on before the boot fade. This is a hardware glitch — PWM hardware may briefly output a non-zero value during the time between power-on and `initPins()`/`initPWM()`. **Mitigated:** `setup()` now drives `WARM_PIN` and `COOL_PIN` LOW as the very first lines (before `Serial.begin`, `initPins`, `initPWM`) using `pinMode` + `digitalWrite`. This sets the GPIO output low before PWM hardware takes over, minimising the flash window.
-- Boot CCT snap: persistent issue across multiple PRs. Root cause (final): even after seeding IIR filters from a fresh 8-sample ADC average and calling `ledmix_initCurrent()` after `syncPotsAfterBoot()`, the final fade frame had already called `applyLEDsImmediate(newB, led_targetCCT=4500K)`. Then `syncPotsAfterBoot` updated `led_targetCCT` to 4600K and `ledmix_initCurrent()` updated `led_currentCCT` — but no new `applyLEDsImmediate` was called, so PWM hardware was still at 4500K. The snap appeared on the very next loop frame. **Fixed:** `applyLEDsImmediate(led_currentBrightness, led_currentCCT)` is now called immediately after `ledmix_initCurrent()` inside the `if (bootFadeActive)` block, re-rendering the LEDs at the corrected CCT in the same CPU cycle — completely invisible to the user.
+- Boot CCT snap: persistent issue across multiple PRs. **Definitive root cause:** Cold-start ADC settling causes the boot-time ADC read (32-sample avg in `setup()`) to return ~89 counts lower than the warm-hardware read 1250ms later. This results in a 1-step CCT difference (e.g. 4500K boot vs 4600K true pot position). When `syncPotsAfterBoot()` previously seeded `cctFiltered` from the stale boot-time CCT parameter (e.g. step 18 → `cctFiltered=0.4737`), the IIR filter would then slowly converge toward the real pot position (cctNorm≈0.4937) over ~20 frames. When `cctStepFloat` crossed `prevCCTStep + 0.5 + 0.20 = 18.70`, the Schmitt trigger fired → visible CCT snap seconds after boot. **Fix:** `delay(500)` before boot ADC reads in `setup()` (both NORMAL and DUMB paths) lets the ADC settle so boot read matches the warm read. `syncPotsAfterBoot()` now takes a fresh 8-sample ADC read, seeds `dutyFiltered`/`cctFiltered` from intermediate `dutyNorm`/`cctNorm` variables, and derives `prevDutyStep`/`prevCCTStep` from those SAME variables — guaranteeing filter and step state are always consistent. `ledmix_initCurrent()` + `applyLEDsImmediate()` are called immediately after in `ledmix.cpp` to render the corrected CCT in the same frame.
 - Persistent 200K CCT offset at boot (CCT pot at center shows 4400K instead of 4600K): suspected hardware calibration issue.
   - If the pot's physical max stop does not reach ADC=4095 (e.g. max ≈ 3660 counts), then the electrical centre falls at ~1830 counts → normalizes to ~0.447 → 4400K.
   - Boot delay increased to 500ms and sample count increased to 32 to rule out ADC settling.
