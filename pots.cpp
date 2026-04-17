@@ -23,8 +23,8 @@ float lastCCTNorm  = 0.0f;
 
 static const float DUTY_STEP_HYST_ST    = 0.15f;  // Schmitt dead-band per side (duty)
 static const float CCT_STEP_HYST_ST     = 0.15f;  // Schmitt dead-band per side (CCT)
-static const float DUMB_BRIGHTNESS_DB  = 0.003f;  // 0.3% brightness dead-band for ADC noise
-static const float DUMB_CCT_DB         = 5.0f;    // 5 K CCT dead-band for ADC noise
+static const float DUMB_BRIGHTNESS_DB  = 0.005f;  // wider dead-band to suppress ADC noise
+static const float DUMB_CCT_DB         = 10.0f;   // 10 K CCT dead-band to suppress ADC noise
 
 // IIR filter state — file-scope so syncPotsAfterBoot() can seed them
 static float dutyFiltered = -1.0f;
@@ -201,29 +201,10 @@ void handlePots(unsigned long now)
 
 void syncPotsAfterBoot(float brightness, float cct)
 {
-    // Find nearest brightness step to fade target
-    int bestBStep = 0;
-    float bestBDiff = fabsf(normalBrightnessSteps[0] - brightness);
-    for (int i = 1; i < NORMAL_STEPS; i++) {
-        float diff = fabsf(normalBrightnessSteps[i] - brightness);
-        if (diff < bestBDiff) {
-            bestBDiff = diff;
-            bestBStep = i;
-        }
-    }
-    prevDutyStep      = bestBStep;
-    currentBrightness = normalBrightnessSteps[bestBStep];
-
-    // Find nearest CCT step to fade target CCT
-    int cctStep = constrain((int)round((cct - 2700.0f) / 100.0f), 0, 38);
-    prevCCTStep = cctStep;
-    currentCCT  = 2700.0f + cctStep * 100.0f;
-
-    // Seed IIR filters from a fresh 8-sample ADC average.
-    // Step-index seeding caused a mismatch vs the first handlePots() ADC read:
-    // if the delta exceeded 0.01 normalized (~41 counts), fast alpha (0.60) fired
-    // the Schmitt trigger immediately → CCT/brightness snap on first frame.
-    // Seeding from ADC means first-frame delta ≈ 0 → always slow alpha → no snap.
+    // Take fresh 8-sample ADC to get accurate post-fade pot positions.
+    // Boot-time ADC (16 samples, taken over the soft-start fade duration) can differ from
+    // post-fade ADC due to ADC settling at cold start. All internal state must derive from
+    // ONE reading to guarantee filter and step indices are consistent — preventing Schmitt snap.
     int dutySum = 0, cctSum = 0;
     for (int i = 0; i < 8; i++) {
         dutySum += analogRead(DUTY_POT_PIN);
@@ -232,7 +213,18 @@ void syncPotsAfterBoot(float brightness, float cct)
     dutyFiltered = constrain((dutySum / 8.0f - DUTY_MIN_RAW) / float(DUTY_MAX_RAW - DUTY_MIN_RAW), 0.0f, 1.0f);
     cctFiltered  = constrain((cctSum  / 8.0f - CCT_MIN_RAW)  / float(CCT_MAX_RAW  - CCT_MIN_RAW),  0.0f, 1.0f);
 
-    // Also update ledmix targets to match, preventing fallthrough snap
+    // Derive step indices from the SAME normalized values that seed the filter.
+    // This is the critical invariant: filter and step indices must always agree,
+    // or the very first handlePots() call will trigger a Schmitt transition.
+    prevDutyStep      = constrain((int)roundf(dutyFiltered * (NORMAL_STEPS - 1)), 0, NORMAL_STEPS - 1);
+    currentBrightness = normalBrightnessSteps[prevDutyStep];
+    prevCCTStep       = constrain((int)roundf(cctFiltered * 38.0f), 0, 38);
+    currentCCT        = 2700.0f + prevCCTStep * 100.0f;
+
+    // Update ledmix to the derived values.
+    // If post-boot ADC differs from boot-time ADC, this may shift CCT/brightness
+    // at the moment the fade ends — but this is unavoidable and far less visible
+    // than a snap one frame later in handlePots().
     ledmix_set(currentBrightness, currentCCT);
 }
 
