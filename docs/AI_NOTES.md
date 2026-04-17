@@ -34,8 +34,8 @@ Last updated: 2026-04-17
 
 - Brightness: stepped via `normalBrightnessSteps[]` table (`NORMAL_STEPS` entries, defined in `calibration.cpp`)
 - CCT: 39 steps, 2700K–6500K, 100K per step
-- Pot changes use Schmitt trigger hysteresis (±0.15 step dead-band per boundary) to prevent oscillation
-- IIR filter α=0.10 (settled) / α=0.60 (moving, delta > 0.01) on raw ADC before step logic
+- Pot changes use Schmitt trigger hysteresis (±0.20 step dead-band per boundary) to prevent oscillation
+- IIR filter α=0.10 (settled) / α=0.60 (moving, delta > 0.025) on raw ADC before step logic
 - Buzzer clicks on each step change (duty and CCT), suppressed on first-call commit
 - STANDBY fade uses `normalFadeActive` engine in `ledmix.cpp`
 - STANDBY→NORMAL fade starts at `constrain(min_duty, 0, newB)` to avoid flash at step 0
@@ -44,9 +44,10 @@ Last updated: 2026-04-17
 
 - Brightness: continuous, `min_duty + dutyNorm * (1 - min_duty)`, applied immediately
 - CCT: continuous 2700K–6500K, applied immediately
-- No gamma in DUMB (`applyLEDsImmediate` excludes `MODE_DUMB` from `useGamma`); dedicated adaptive IIR filter (α=0.05 settled / α=0.40 moving, threshold 0.005, applied to RAW ADC normalized values) + dead-band (0.005 brightness, 10K CCT)
+- Gamma IS applied in DUMB (`applyLEDsImmediate` includes `MODE_DUMB` in `useGamma`); dedicated adaptive IIR filter (α=0.05 settled / α=0.40 moving, threshold 0.005, applied to RAW ADC normalized values) + dead-band (0.005 brightness, 10K CCT)
 - No buzzer clicks or beeps in DUMB (except `buzzerStartupBeep` at NORMAL boot, which ignores flags)
-- DUMB display: actual PWM duty of the dominant channel — `max(ledmix_getWarmDuty(), ledmix_getCoolDuty()) * 100`, floored at 0.01% via `constrain`. This matches oscilloscope readings. When CCT splits power across warm/cool channels, per-channel duty is lower than logical brightness; displaying the dominant channel duty shows the real electrical duty. (Note: previous versions used a pot-normalized formula `(rawB - min_duty)/(1 - min_duty) * 100` which was inaccurate; reverted to dominant-channel display since CCT endpoint snap zones now ensure full range reachability.)
+- DUMB display: pot-normalized duty — `(rawB - min_duty) / (1 - min_duty) * 100`, floored at 0.01%. Shows 0.01% at pot-minimum, 100% at pot-maximum. `rawB = ledmix_getBrightness()` equals `min_duty` exactly when `dumbDutyFiltered` snaps to 0.
+- mDUTY indicator in DUMB: shown when `ledmix_getBrightness()` is within ±0.001 of `min_duty` (i.e., pot is at minimum). In NORMAL/DEMO/etc: shown when `currentWarmDuty == min_duty || currentCoolDuty == min_duty`.
 - DUMB CCT display: 10K resolution (rounded to nearest 10K) for continuous movement feel; NORMAL mode uses 100K resolution
 - DUMB duty endpoint snap zones: `dumbDutyFiltered < 0.015` → clamp to 0; `dumbDutyFiltered > 0.985` → clamp to 1. Ensures pots that don't reach full ADC range can still hit 0% and 100%. (was 0.03/0.97 — too wide at low end, reduced fine control)
 - DUMB CCT endpoint snap zones: `dumbCCTFiltered < 0.01` → clamp to 0.0 (2700K); `dumbCCTFiltered > 0.99` → clamp to 1.0 (6500K). Without these, `dumbCCTFiltered` approaches 0/1 asymptotically and `mix` in `applyLEDsImmediate` never equals exactly 0.0f or 1.0f. The `mix==0.0f` (warm=min_duty, cool=off) and `mix==1.0f` (cool=min_duty, warm=off) branches are ONLY reachable with these snap zones.
@@ -73,7 +74,7 @@ Last updated: 2026-04-17
 4. `ledmix_set(0, startCCT)` + `applyLEDsImmediate(0, startCCT)` + `ledmix_initCurrent()`
 5. `buzzerStartupBeep()` (ignores enable flags)
 6. Start `normalFadeActive` from 0 → targetB
-7. On fade complete: `systemInitialized = true`, `buzzer_click_enabled = true`, call `syncPotsAfterBoot()`, then call `ledmix_initCurrent()` to sync `led_currentCCT`/`led_currentBrightness` to the post-boot targets immediately — prevents a 1-frame CCT snap on the very next `updateLEDLogic()` call
+7. On fade complete: `systemInitialized = true`, `buzzer_click_enabled = true`, call `syncPotsAfterBoot()`, call `ledmix_initCurrent()` to sync `led_currentCCT`/`led_currentBrightness` to the post-boot targets, then call `applyLEDsImmediate(led_currentBrightness, led_currentCCT)` to re-render LEDs at the corrected CCT in the same frame — eliminates the startup CCT snap completely
 
 ### DUMB boot
 1. `delay(500)` to let ADC input capacitance and voltage reference settle after power-on
@@ -86,7 +87,7 @@ Last updated: 2026-04-17
 
 ## Pot Filter Architecture (pots.cpp)
 
-- Shared IIR filter: `dutyFiltered`, `cctFiltered`, adaptive α (0.10 settled / 0.60 moving, threshold delta > 0.01) — used for NORMAL mode step logic
+- Shared IIR filter: `dutyFiltered`, `cctFiltered`, adaptive α (0.10 settled / 0.60 moving, threshold delta > 0.025) — used for NORMAL mode step logic
 - DUMB-specific IIR: `dumbDutyFiltered`, `dumbCCTFiltered`, adaptive α (**0.05 settled** / 0.40 moving, threshold delta > 0.005) — applied to **raw (pre-shared-IIR) ADC normalized values**, NOT to shared filter output
 - All four filters are **file-scope statics** in `pots.cpp` — NOT static locals inside `handlePots()`
 - `rawDutyNorm` / `rawCCTNorm`: local variables saved immediately after `constrain` in `handlePots()`, before the shared IIR block overwrites `dutyNorm`/`cctNorm` — these are the DUMB IIR inputs
@@ -97,17 +98,17 @@ Last updated: 2026-04-17
 ## Known Issues / History
 
 - Pre-startup LED flash: LEDs sometimes flash briefly at power-on before the boot fade. This is a hardware glitch — PWM hardware may briefly output a non-zero value during the time between power-on and `initPins()`/`initPWM()`. **Mitigated:** `setup()` now drives `WARM_PIN` and `COOL_PIN` LOW as the very first lines (before `Serial.begin`, `initPins`, `initPWM`) using `pinMode` + `digitalWrite`. This sets the GPIO output low before PWM hardware takes over, minimising the flash window.
-- Boot CCT snap: persistent issue across multiple PRs. Root cause (final): even after seeding IIR filters from a fresh 8-sample ADC average, `syncPotsAfterBoot()` calls `ledmix_set()` which updates `led_targetCCT` to the new post-boot value — but `led_currentCCT` is still the boot-time value. The very next frame of `updateLEDLogic()` assigned `led_currentCCT = led_targetCCT`, which caused a 1-frame snap. **Fixed:** `ledmix_initCurrent()` is now called immediately after `syncPotsAfterBoot()` in the `if (bootFadeActive)` block of `updateLEDLogic()`, syncing current to target before the next frame.
+- Boot CCT snap: persistent issue across multiple PRs. Root cause (final): even after seeding IIR filters from a fresh 8-sample ADC average and calling `ledmix_initCurrent()` after `syncPotsAfterBoot()`, the final fade frame had already called `applyLEDsImmediate(newB, led_targetCCT=4500K)`. Then `syncPotsAfterBoot` updated `led_targetCCT` to 4600K and `ledmix_initCurrent()` updated `led_currentCCT` — but no new `applyLEDsImmediate` was called, so PWM hardware was still at 4500K. The snap appeared on the very next loop frame. **Fixed:** `applyLEDsImmediate(led_currentBrightness, led_currentCCT)` is now called immediately after `ledmix_initCurrent()` inside the `if (bootFadeActive)` block, re-rendering the LEDs at the corrected CCT in the same CPU cycle — completely invisible to the user.
 - Persistent 200K CCT offset at boot (CCT pot at center shows 4400K instead of 4600K): suspected hardware calibration issue.
   - If the pot's physical max stop does not reach ADC=4095 (e.g. max ≈ 3660 counts), then the electrical centre falls at ~1830 counts → normalizes to ~0.447 → 4400K.
   - Boot delay increased to 500ms and sample count increased to 32 to rule out ADC settling.
   - Serial debug prints raw ADC values at boot (both paths in `RP2040_CCT_Dimmer.ino`) and in `syncPotsAfterBoot()` so the actual hardware reading can be measured.
   - Proper fix deferred to CAL mode (will allow measuring `CCT_MAX_RAW` in-situ).
-- DUMB gamma bug: `applyLEDsImmediate` was applying gamma to DUMB mode (`useGamma = !(FREQ || CAL)` did not exclude DUMB). At `min_duty=0.0453`, gamma gave `0.0453^2.2 = 0.00114 = 0.11%` display minimum instead of 0.01%, and max ≈ 52.5% instead of 100%. **Fixed:** `MODE_DUMB` is now excluded from `useGamma`; display formula was temporarily changed to pot-normalized `(rawB - min_duty)/(1 - min_duty) * 100` but has since been **reverted** back to `max(ledmix_getWarmDuty(), ledmix_getCoolDuty()) * 100` (matching oscilloscope) since CCT endpoint snap zones now ensure full range reachability.
+- DUMB gamma bug: `applyLEDsImmediate` was applying gamma to DUMB mode (`useGamma = !(FREQ || CAL)` did not exclude DUMB). At `min_duty=0.0453`, gamma gave `0.0453^2.2 = 0.00114 = 0.11%` display minimum instead of 0.01%, and max ≈ 52.5% instead of 100%. **Fixed:** `MODE_DUMB` is no longer excluded from `useGamma` — gamma is correctly restored in DUMB. Display formula changed to pot-normalized `(rawB - min_duty)/(1 - min_duty) * 100` (0.01%–100%) so at pot-minimum `rawB=min_duty` → 0.01%, at pot-maximum → 100%. The `effective_off_threshold` guard already excludes DUMB mode so LEDs won't be cut off at minimum.
 - DUMB mode filter lag: old implementation was a cascade double-filter — shared adaptive IIR (α=0.10/0.60) followed by a second fixed-α IIR (α=0.05) on the already-filtered output. Combined lag was severe. **Fixed:** DUMB IIR now operates on raw (pre-shared-IIR) ADC normalized values, with adaptive α=0.40 (moving, delta > 0.005) / α=0.10 (settled). Feels analog-snappy when moving, suppresses noise when settled.
 - DUMB idle jitter: with α=0.10 settled and RP2040 ADC noise of ~10–20 LSB, filtered output could still cross old dead-band thresholds. **Fixed:** widened to `DUMB_BRIGHTNESS_DB = 0.005` and `DUMB_CCT_DB = 10.0K`.
 - DUMB min: pots are calibrated to reach 0 cleanly; snap zones should NOT be added.
-- Step oscillation: old `|x - N| > 0.05` hysteresis caused oscillation at boundaries. Replaced with Schmitt trigger (±0.15 dead-band).
+- Step oscillation: old `|x - N| > 0.05` hysteresis caused oscillation at boundaries. Replaced with Schmitt trigger (±0.20 dead-band). Also increased shared IIR moving threshold from 0.01 to 0.025 (≈102 ADC counts, well above RP2040 ADC noise floor of 30–50 LSB) to prevent fast-alpha from being triggered by ADC noise in NORMAL mode idle.
 
 ## Files
 

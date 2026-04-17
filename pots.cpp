@@ -21,8 +21,8 @@
 float lastDutyNorm = 0.0f;
 float lastCCTNorm  = 0.0f;
 
-static const float DUTY_STEP_HYST_ST    = 0.15f;  // Schmitt dead-band per side (duty)
-static const float CCT_STEP_HYST_ST     = 0.15f;  // Schmitt dead-band per side (CCT)
+static const float DUTY_STEP_HYST_ST    = 0.20f;  // Schmitt dead-band per side (duty)
+static const float CCT_STEP_HYST_ST     = 0.20f;  // Schmitt dead-band per side (CCT)
 static const float DUMB_BRIGHTNESS_DB  = 0.005f;  // wider dead-band to suppress ADC noise
 static const float DUMB_CCT_DB         = 10.0f;   // 10 K CCT dead-band to suppress ADC noise
 static const float DUMB_DUTY_SNAP_LO   = 0.015f;  // endpoint snap: below this → clamp to 0
@@ -73,11 +73,11 @@ void handlePots(unsigned long now)
         // - Fast response when pot is moving (large frame-to-frame delta)
         // - Stable filtering when pot is settled (small delta)
         // α ramps from 0.10 (settled) to 0.60 (moving fast)
-        // Threshold for "moving": > 0.01 normalized (~41 ADC counts)
+        // Threshold for "moving": > 0.025 normalized (~102 ADC counts, above RP2040 noise floor)
         float dutyDelta = fabsf(dutyNorm - dutyFiltered);
         float cctDelta  = fabsf(cctNorm  - cctFiltered);
-        float dutyAlpha = (dutyDelta > 0.01f) ? 0.60f : 0.10f;
-        float cctAlpha  = (cctDelta  > 0.01f) ? 0.60f : 0.10f;
+        float dutyAlpha = (dutyDelta > 0.025f) ? 0.60f : 0.10f;
+        float cctAlpha  = (cctDelta  > 0.025f) ? 0.60f : 0.10f;
         dutyFiltered = dutyFiltered * (1.0f - dutyAlpha) + dutyNorm * dutyAlpha;
         cctFiltered  = cctFiltered  * (1.0f - cctAlpha)  + cctNorm  * cctAlpha;
     }
