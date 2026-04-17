@@ -79,10 +79,13 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
     display.print("DUTY ");
     float displayDutyPercent;
     if (currentMode == MODE_DUMB || (currentMode == MODE_STANDBY && previousMode == MODE_DUMB)) {
-        // Normalize: 0.01% at pot-minimum (rawB=min_duty), 100% at pot-maximum (rawB=1.0)
-        float rawB = ledmix_getBrightness();
-        float norm = constrain((rawB - min_duty) / (1.0f - min_duty), 0.0f, 1.0f);
-        displayDutyPercent = max(norm * 100.0f, 0.01f);
+        // Show actual PWM duty of the dominant channel, matching oscilloscope reading.
+        // When CCT splits power across warm/cool channels, per-channel duty is lower
+        // than logical brightness. This shows the real electrical duty on either channel.
+        float warmD = ledmix_getWarmDuty();
+        float coolD = ledmix_getCoolDuty();
+        displayDutyPercent = max(warmD, coolD) * 100.0f;
+        displayDutyPercent = constrain(displayDutyPercent, 0.01f, 100.0f);
     } else {
         // NORMAL / STANDBY(from NORMAL) / DEMO / FREQ / etc: raw brightness * 100
         displayDutyPercent = ledmix_getBrightness() * 100.0f;
@@ -115,7 +118,7 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
     }
 
     if (currentWarmDuty == min_duty || currentCoolDuty == min_duty) {
-        display.setCursor(100, 2);  //Match DUTY line heright
+        display.setCursor(94, 2);  // was 100 — moved left to prevent "Y" wrapping
         display.print("mDUTY");
     }
 

@@ -202,6 +202,7 @@ void updateLEDLogic(unsigned long now)
                 systemInitialized    = true;
                 buzzer_click_enabled = true;  // enable clicks after NORMAL boot
                 syncPotsAfterBoot(normalFadeEndB, led_currentCCT);
+                ledmix_initCurrent();  // sync current to updated target; prevents 1-frame CCT snap
             }
         }
 
