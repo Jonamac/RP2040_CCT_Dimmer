@@ -34,6 +34,9 @@ void updateModeBehavior(unsigned long now);
 // MAIN BUTTON — short press
 void handleMainButtonRelease(unsigned long heldMs, unsigned long now);
 
+// DUMB BUTTON — short press (standby toggle)
+void handleDumbToggle(unsigned long now);
+
 // DISPLAY BUTTON — short press
 void handleDispButtonRelease(unsigned long heldMs);
 

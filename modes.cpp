@@ -144,30 +144,61 @@ void handleDumbSwitch(unsigned long now) {
 }
 
 // =====================================================
-//  MAIN BUTTON — SHORT PRESS
+//  DUMB BUTTON — SHORT PRESS (STANDBY TOGGLE)
 // =====================================================
-void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
+void handleDumbToggle(unsigned long now) {
 
-    // DUMB MODE: only allow STANDBY toggle
-    if (currentMode == MODE_DUMB) {
-        if (heldMs < 1500) {
-            previousMode = currentMode;
-            currentMode  = MODE_STANDBY;
+    // STANDBY → DUMB (exit standby back to DUMB)
+    if (currentMode == MODE_STANDBY && previousMode == MODE_DUMB) {
+        previousMode = currentMode;
+        currentMode  = MODE_DUMB;
 
-            // Start fade DOWN
-            dumbFadeActive     = true;
-            dumbFadeDirection  = false;
-            dumbFadeStartB     = ledmix_getBrightness();
-            dumbFadeEndB       = 0.0f;
-            dumbFadeStartTime  = now;
-            dumbFadeDuration   = dumb_standby_fade_time_ms;
+        int rawDutyADC = readADC(DUTY_POT_PIN);
+        float dutyNorm = (rawDutyADC - DUTY_MIN_RAW) /
+                         float(DUTY_MAX_RAW - DUTY_MIN_RAW);
+        dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
+        float linearBrightness = min_duty + dutyNorm * (1.0f - min_duty);
 
-            ledmix_set(0.0f, ledmix_getCCT());
+        dumbFadeActive     = true;
+        dumbFadeDirection  = true;
+        dumbFadeStartB     = 0.0f;
+        dumbFadeEndB       = linearBrightness;
+        dumbFadeStartTime  = now;
+        dumbFadeDuration   = dumb_soft_start_ms;
 
-            // DUMB mode transitions are always silent — no buzzer
+        ledmix_set(linearBrightness, ledmix_getCCT());
+
+        if (systemInitialized) {
+            buzzerModeChangeBeep();
+            buzzerQuietUntil = millis() + 200;
         }
         return;
     }
+
+    // DUMB → STANDBY (enter standby from DUMB)
+    if (currentMode == MODE_DUMB) {
+        previousMode = currentMode;
+        currentMode  = MODE_STANDBY;
+
+        // Start fade DOWN
+        dumbFadeActive     = true;
+        dumbFadeDirection  = false;
+        dumbFadeStartB     = ledmix_getBrightness();
+        dumbFadeEndB       = 0.0f;
+        dumbFadeStartTime  = now;
+        dumbFadeDuration   = dumb_standby_fade_time_ms;
+
+        ledmix_set(0.0f, ledmix_getCCT());
+
+        // DUMB mode transitions are always silent — no buzzer
+        return;
+    }
+}
+
+// =====================================================
+//  MAIN BUTTON — SHORT PRESS
+// =====================================================
+void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
 
     // Ignore long presses
     if (heldMs > 1500) return;
@@ -195,33 +226,6 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
     //  STANDBY EXIT LOGIC
     // =====================================================
     if (currentMode == MODE_STANDBY) {
-
-        // Return to DUMB MODE
-        if (previousMode == MODE_DUMB) {
-            previousMode = currentMode;
-            currentMode  = MODE_DUMB;
-
-            int rawDutyADC = readADC(DUTY_POT_PIN);
-            float dutyNorm = (rawDutyADC - DUTY_MIN_RAW) /
-                             float(DUTY_MAX_RAW - DUTY_MIN_RAW);
-            dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
-            float linearBrightness = min_duty + dutyNorm * (1.0f - min_duty);
-
-            dumbFadeActive     = true;
-            dumbFadeDirection  = true;
-            dumbFadeStartB     = 0.0f;
-            dumbFadeEndB       = linearBrightness;
-            dumbFadeStartTime  = now;
-            dumbFadeDuration   = dumb_soft_start_ms;
-
-            ledmix_set(linearBrightness, ledmix_getCCT());
-
-            if (systemInitialized) {
-                buzzerModeChangeBeep();
-                buzzerQuietUntil = millis() + 200;
-            }
-            return;
-        }
 
         // Return to FREQ
         if (previousMode == MODE_FREQ) {
@@ -419,11 +423,6 @@ void handleDispButtonRelease(unsigned long heldMs) {
         return;
     }
 
-    if (currentMode == MODE_DUMB || previousMode == MODE_DUMB) {
-        toggleDisplay();
-        return;
-    }
-
     // Long press → DEMO toggle
     if (heldMs >= demo_mode_delay_ms) {
         if (currentMode == MODE_DEMO) {
@@ -493,36 +492,8 @@ void handleMainLongPress() {
         return;
     }
 
-    // NORMAL → OVERRIDE+
-    if (currentMode == MODE_NORMAL) {
-        previousMode = currentMode;
-        currentMode  = MODE_CAL;
-
-        int rawDutyADC = analogRead(DUTY_POT_PIN);
-        float dutyNorm = (rawDutyADC - DUTY_MIN_RAW) /
-                         float(DUTY_MAX_RAW - DUTY_MIN_RAW);
-        dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
-
-        int idx = round(dutyNorm * 19.0f);
-        idx = constrain(idx, 0, 19);
-
-        const float overrideBrightnessSteps[20] = {
-            0.002f, 0.003f, 0.004f, 0.005f, 0.006f,
-            0.007f, 0.008f, 0.009f, 0.010f, 0.011f,
-            0.012f, 0.013f, 0.014f, 0.015f, 0.016f,
-            0.017f, 0.018f, 0.019f, 0.020f, 0.020f
-        };
-        float newB = overrideBrightnessSteps[idx];
-
-        calPresetIndex = 2;
-        float newC = calPresets[calPresetIndex];
-
-        ledmix_set(newB, newC);
-    }
-
-    // OVERRIDE+ → NORMAL
-    else if (currentMode == MODE_FREQ ||
-             currentMode == MODE_CAL ||
+    // CAL/DEMO/STANDBY → NORMAL
+    if (currentMode == MODE_CAL ||
              currentMode == MODE_DEMO ||
              currentMode == MODE_STANDBY) {
         previousMode = currentMode;
