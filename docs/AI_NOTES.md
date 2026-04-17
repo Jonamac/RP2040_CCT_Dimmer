@@ -1,7 +1,7 @@
 # AI Notes — RP2040 CCT Dimmer
 
 Long-term memory file for AI assistants working on this codebase.
-Last updated: 2026-04-17 (boot CCT snap definitive fix)
+Last updated: 2026-04-17
 
 ---
 
@@ -68,13 +68,14 @@ Last updated: 2026-04-17 (boot CCT snap definitive fix)
 ## Boot Sequence
 
 ### NORMAL boot
-1. `delay(500)` to let ADC input capacitance and voltage reference settle after power-on
-2. Average 32 ADC samples for each pot; Serial.print raw averages for diagnostic
-3. Compute `targetB = normalBrightnessSteps[idx]` and `startCCT`
-4. `ledmix_set(0, startCCT)` + `applyLEDsImmediate(0, startCCT)` + `ledmix_initCurrent()`
-5. `buzzerStartupBeep()` (ignores enable flags)
-6. Start `normalFadeActive` from 0 → targetB
-7. On fade complete: `systemInitialized = true`, `buzzer_click_enabled = true`, call `syncPotsAfterBoot()`, call `ledmix_initCurrent()` to sync `led_currentCCT`/`led_currentBrightness` to the post-boot targets, then call `applyLEDsImmediate(led_currentBrightness, led_currentCCT)` to re-render LEDs at the corrected CCT in the same frame — eliminates the startup CCT snap completely
+1. Read DUTY ADC (32 samples) — brightness step doesn't require ADC settling
+2. Compute `targetB = normalBrightnessSteps[idx]`
+3. `ledmix_set(0, 4600.0f)` + `applyLEDsImmediate(0, 4600.0f)` + `ledmix_initCurrent()` — LEDs off, placeholder CCT (no visual effect at brightness 0)
+4. `buzzerStartupBeep()` (blocking, ~200–400ms) — this free settling time lets the RP2040 ADC input capacitor and voltage reference reach operating temperature
+5. Read CCT ADC (32 samples) **post-beep** — now settled; produces the same value that `syncPotsAfterBoot()` will read at fade-end
+6. Compute `startCCT`; `ledmix_set(0, startCCT)` + `ledmix_initCurrent()` — update with settled CCT
+7. Start `normalFadeActive` from 0 → targetB
+8. On fade complete: `systemInitialized = true`, `buzzer_click_enabled = true`, call `syncPotsAfterBoot()`, call `ledmix_initCurrent()` to sync `led_currentCCT`/`led_currentBrightness` to the post-boot targets, then call `applyLEDsImmediate(led_currentBrightness, led_currentCCT)` to re-render LEDs at the corrected CCT in the same frame
 
 ### DUMB boot
 1. `delay(500)` to let ADC input capacitance and voltage reference settle after power-on
@@ -98,7 +99,7 @@ Last updated: 2026-04-17 (boot CCT snap definitive fix)
 ## Known Issues / History
 
 - Pre-startup LED flash: LEDs sometimes flash briefly at power-on before the boot fade. This is a hardware glitch — PWM hardware may briefly output a non-zero value during the time between power-on and `initPins()`/`initPWM()`. **Mitigated:** `setup()` now drives `WARM_PIN` and `COOL_PIN` LOW as the very first lines (before `Serial.begin`, `initPins`, `initPWM`) using `pinMode` + `digitalWrite`. This sets the GPIO output low before PWM hardware takes over, minimising the flash window.
-- Boot CCT snap: persistent issue across multiple PRs. **Definitive root cause:** Cold-start ADC settling causes the boot-time ADC read (32-sample avg in `setup()`) to return ~89 counts lower than the warm-hardware read 1250ms later. This results in a 1-step CCT difference (e.g. 4500K boot vs 4600K true pot position). When `syncPotsAfterBoot()` previously seeded `cctFiltered` from the stale boot-time CCT parameter (e.g. step 18 → `cctFiltered=0.4737`), the IIR filter would then slowly converge toward the real pot position (cctNorm≈0.4937) over ~20 frames. When `cctStepFloat` crossed `prevCCTStep + 0.5 + 0.20 = 18.70`, the Schmitt trigger fired → visible CCT snap seconds after boot. **Fix:** `delay(500)` before boot ADC reads in `setup()` (both NORMAL and DUMB paths) lets the ADC settle so boot read matches the warm read. `syncPotsAfterBoot()` now takes a fresh 8-sample ADC read, seeds `dutyFiltered`/`cctFiltered` from intermediate `dutyNorm`/`cctNorm` variables, and derives `prevDutyStep`/`prevCCTStep` from those SAME variables — guaranteeing filter and step state are always consistent. `ledmix_initCurrent()` + `applyLEDsImmediate()` are called immediately after in `ledmix.cpp` to render the corrected CCT in the same frame.
+- Boot CCT snap: persistent issue across multiple PRs. **Definitive root cause:** Cold-start ADC input capacitor charging causes the CCT ADC read taken immediately after power-on to underread by ~89 counts (~1 step, e.g. 4500K instead of 4600K). **Fix:** DUTY ADC is read first (doesn't need settling), then `buzzerStartupBeep()` fires (blocking ~200–400ms — free settling time), then CCT ADC is read post-beep. This settled post-beep read matches the value `syncPotsAfterBoot()` takes at fade-end, so `startCCT` equals the true pot position → no step mismatch → no Schmitt trigger snap. In addition, `syncPotsAfterBoot()` seeds `cctFiltered`/`prevCCTStep` from a fresh 8-sample ADC read (not from the boot CCT parameter), and `ledmix_initCurrent()` + `applyLEDsImmediate()` are called immediately after in `ledmix.cpp` to render at the corrected CCT in the same frame. **If boot CCT snap persists after this fix**, the root cause is a hardware ADC transient at power-on that software cannot fully compensate; this is cosmetic only (CCT shifts by 100K at end of startup fade if pot is between steps) and can be accepted until CAL mode is implemented.
 - Persistent 200K CCT offset at boot (CCT pot at center shows 4400K instead of 4600K): suspected hardware calibration issue.
   - If the pot's physical max stop does not reach ADC=4095 (e.g. max ≈ 3660 counts), then the electrical centre falls at ~1830 counts → normalizes to ~0.447 → 4400K.
   - Boot delay increased to 500ms and sample count increased to 32 to rule out ADC settling.
