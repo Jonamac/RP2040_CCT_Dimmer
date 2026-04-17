@@ -97,27 +97,34 @@ void setup() {
     buzzer_click_enabled = false;
     buzzer_beep_enabled  = true;
 
-    // Allow ADC input capacitance and voltage reference to settle after power-on.
-    delay(500);
-
-    // Average 32 readings for stable boot-time pot values
-    // (single samples are too noisy at 12-bit resolution)
-    int dutySum = 0, cctSum = 0;
-    for (int i = 0; i < 32; i++) {
-        dutySum += analogRead(DUTY_POT_PIN);
-        cctSum  += analogRead(CCT_POT_PIN);
-    }
+    // Read DUTY ADC now — brightness step doesn't require ADC settling
+    int dutySum = 0;
+    for (int i = 0; i < 32; i++) dutySum += analogRead(DUTY_POT_PIN);
     int rawDutyADC = dutySum / 32;
-    int rawCCTADC  = cctSum  / 32;
-    Serial.print("Boot ADC — DUTY raw: "); Serial.print(rawDutyADC);
-    Serial.print(" | CCT raw: "); Serial.println(rawCCTADC);
 
     float dutyNorm = constrain(
         (rawDutyADC - DUTY_MIN_RAW) / float(DUTY_MAX_RAW - DUTY_MIN_RAW),
         0.0f, 1.0f);
-    int idx = round(dutyNorm * (NORMAL_STEPS - 1));
-    idx = constrain(idx, 0, NORMAL_STEPS - 1);
+    int idx = constrain((int)round(dutyNorm * (NORMAL_STEPS - 1)), 0, NORMAL_STEPS - 1);
     float targetB = normalBrightnessSteps[idx];
+
+    // Apply initial state (LEDs off, default CCT) — CCT will be updated below
+    ledmix_set(0.0f, 4600.0f);
+    applyLEDsImmediate(0.0f, 4600.0f);
+    ledmix_initCurrent();
+
+    // Fire startup beep BEFORE reading CCT ADC.
+    // buzzerStartupBeep() is blocking (~200–400ms) — this gives the RP2040 ADC
+    // input capacitor and voltage reference time to fully settle at operating
+    // temperature. Reading CCT after the beep produces the same value that
+    // syncPotsAfterBoot() will read at fade-end, eliminating the CCT mismatch
+    // that causes the visible snap.
+    buzzerStartupBeep();
+
+    // Now read CCT ADC — ADC has settled during the beep
+    int cctSum = 0;
+    for (int i = 0; i < 32; i++) cctSum += analogRead(CCT_POT_PIN);
+    int rawCCTADC = cctSum / 32;
 
     float cctNorm = constrain(
         (rawCCTADC - CCT_MIN_RAW) / float(CCT_MAX_RAW - CCT_MIN_RAW),
@@ -125,13 +132,14 @@ void setup() {
     int stepIdx = constrain((int)round(cctNorm * 38.0f), 0, 38);
     float startCCT = 2700.0f + stepIdx * 100.0f;
 
-    // Apply initial state (LEDs off, CCT set)
-    ledmix_set(0.0f, startCCT);
-    applyLEDsImmediate(0.0f, startCCT);
-    ledmix_initCurrent();
+    Serial.print("Boot ADC — DUTY raw: "); Serial.print(rawDutyADC);
+    Serial.print(" | CCT raw (post-beep): "); Serial.print(rawCCTADC);
+    Serial.print(" → stepIdx: "); Serial.print(stepIdx);
+    Serial.print(" → startCCT: "); Serial.println(startCCT);
 
-    // Fire startup beep immediately (buzzerStartupBeep ignores enable flags)
-    buzzerStartupBeep();
+    // Update ledmix with the settled CCT before starting the fade
+    ledmix_set(0.0f, startCCT);
+    ledmix_initCurrent();
 
     // Start async NORMAL boot fade
     normalFadeActive    = true;
