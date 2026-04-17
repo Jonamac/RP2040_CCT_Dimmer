@@ -79,12 +79,12 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
     display.print("DUTY ");
     float displayDutyPercent;
     if (currentMode == MODE_DUMB || (currentMode == MODE_STANDBY && previousMode == MODE_DUMB)) {
-        // Normalize DUMB brightness to 0–100% relative to the usable range:
-        // 0% = pot fully down (LEDs at min_duty, just barely on)
-        // 100% = pot fully up
-        float b = ledmix_getBrightness();
-        float range = 1.0f - min_duty;
-        displayDutyPercent = (range > 0.0f) ? ((b - min_duty) / range * 100.0f) : 0.0f;
+        // Show actual PWM duty of the dominant channel, matching oscilloscope reading.
+        // When CCT splits power across warm/cool channels, the per-channel duty is lower
+        // than the logical brightness. This shows the real electrical duty on either channel.
+        float warmD = ledmix_getWarmDuty();
+        float coolD = ledmix_getCoolDuty();
+        displayDutyPercent = max(warmD, coolD) * 100.0f;
         displayDutyPercent = constrain(displayDutyPercent, 0.01f, 100.0f);
     } else {
         // NORMAL / STANDBY(from NORMAL) / DEMO / FREQ / etc: raw brightness * 100

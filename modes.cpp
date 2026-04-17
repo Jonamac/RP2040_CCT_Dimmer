@@ -79,9 +79,23 @@ void handleDumbSwitch(unsigned long now) {
 
     // --- SWITCH TURNED ON (entering DUMB MODE) ---
     if (dumbSwitch && !lastDumbSwitch) {
+        currentMode = MODE_DUMB;
+        normalFadeActive = false;  // Cancel any in-progress NORMAL fade
+        resetDumbFilter();
         lastDutyNorm = -1.0f; // force pot resync
 
-        currentMode = MODE_DUMB;
+        // Use 8-sample averaged ADC for a stable immediate DUMB apply
+        int dutySum = 0, cctSum = 0;
+        for (int i = 0; i < 8; i++) {
+            dutySum += analogRead(DUTY_POT_PIN);
+            cctSum  += analogRead(CCT_POT_PIN);
+        }
+        float dN = constrain((dutySum/8.0f - DUTY_MIN_RAW) / float(DUTY_MAX_RAW - DUTY_MIN_RAW), 0.0f, 1.0f);
+        float cN = constrain((cctSum/8.0f  - CCT_MIN_RAW)  / float(CCT_MAX_RAW  - CCT_MIN_RAW),  0.0f, 1.0f);
+        float newB = constrain(min_duty + dN * (1.0f - min_duty), min_duty, 1.0f);
+        float newC = constrain(2700.0f + cN * (6500.0f - 2700.0f), 2700.0f, 6500.0f);
+        ledmix_set(newB, newC);
+        applyLEDsImmediate(newB, newC);
     }
 
     // --- SWITCH TURNED OFF (leaving DUMB MODE) ---
@@ -95,28 +109,34 @@ void handleDumbSwitch(unsigned long now) {
             buzzer_beep_enabled  = true;
             buzzer_click_enabled = true;
 
-            // Sample pots and snap to NORMAL state
-            int rawDutyADC = readADC(DUTY_POT_PIN);
-            float dutyNorm = (rawDutyADC - DUTY_MIN_RAW) /
-                             float(DUTY_MAX_RAW - DUTY_MIN_RAW);
-            dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
-
-            int idx = round(dutyNorm * (NORMAL_STEPS - 1));
-            idx = constrain(idx, 0, NORMAL_STEPS - 1);
+            // Average 8 ADC samples for stable NORMAL step selection
+            int dutySum = 0, cctSum = 0;
+            for (int i = 0; i < 8; i++) {
+                dutySum += analogRead(DUTY_POT_PIN);
+                cctSum  += analogRead(CCT_POT_PIN);
+            }
+            float dutyNorm = constrain((dutySum/8.0f - DUTY_MIN_RAW) /
+                                       float(DUTY_MAX_RAW - DUTY_MIN_RAW), 0.0f, 1.0f);
+            int idx = constrain((int)round(dutyNorm * (NORMAL_STEPS - 1)), 0, NORMAL_STEPS - 1);
             float newB = normalBrightnessSteps[idx];
 
-            int rawCCTADC = readADC(CCT_POT_PIN);
-            float norm = (rawCCTADC - CCT_MIN_RAW) /
-                         float(CCT_MAX_RAW - CCT_MIN_RAW);
-            norm = constrain(norm, 0.0f, 1.0f);
-
-            float rawCCT   = 2700.0f + norm * (6500.0f - 2700.0f);
-            int stepIndex  = round((rawCCT - 2700.0f) / 100.0f);
-            stepIndex      = constrain(stepIndex, 0, 38);
-            float newC     = 2700.0f + stepIndex * 100.0f;
+            float cctNorm = constrain((cctSum/8.0f - CCT_MIN_RAW) /
+                                      float(CCT_MAX_RAW - CCT_MIN_RAW), 0.0f, 1.0f);
+            int stepIndex = constrain((int)round(cctNorm * 38.0f), 0, 38);
+            float newC = 2700.0f + stepIndex * 100.0f;
 
             ledmix_set(newB, newC);
-            applyLEDsImmediate(newB, newC);
+
+            // Seed pot filter immediately to prevent post-transition snap on next handlePots()
+            syncPotsAfterBoot(newB, newC);
+
+            // Fade from current brightness to NORMAL step target (quick transition)
+            float startB = constrain(ledmix_getBrightness(), 0.0f, 1.0f);
+            normalFadeActive    = true;
+            normalFadeStartB    = startB;
+            normalFadeEndB      = newB;
+            normalFadeStartTime = now;
+            normalFadeDuration  = fade_time_ms;
         }
     }
 

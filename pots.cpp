@@ -61,8 +61,17 @@ void handlePots(unsigned long now)
         dutyFiltered = dutyNorm;
         cctFiltered  = cctNorm;
     } else {
-        dutyFiltered = dutyFiltered * 0.85f + dutyNorm * 0.15f;
-        cctFiltered  = cctFiltered  * 0.85f + cctNorm  * 0.15f;
+        // Adaptive IIR filter:
+        // - Fast response when pot is moving (large frame-to-frame delta)
+        // - Stable filtering when pot is settled (small delta)
+        // α ramps from 0.10 (settled) to 0.60 (moving fast)
+        // Threshold for "moving": > 0.01 normalized (~41 ADC counts)
+        float dutyDelta = fabsf(dutyNorm - dutyFiltered);
+        float cctDelta  = fabsf(cctNorm  - cctFiltered);
+        float dutyAlpha = (dutyDelta > 0.01f) ? 0.60f : 0.10f;
+        float cctAlpha  = (cctDelta  > 0.01f) ? 0.60f : 0.10f;
+        dutyFiltered = dutyFiltered * (1.0f - dutyAlpha) + dutyNorm * dutyAlpha;
+        cctFiltered  = cctFiltered  * (1.0f - cctAlpha)  + cctNorm  * cctAlpha;
     }
     dutyNorm = dutyFiltered;
     cctNorm  = cctFiltered;
@@ -205,8 +214,14 @@ void syncPotsAfterBoot(float brightness, float cct)
     // Seeding from ADC can land on a different step than setup() computed,
     // causing the very first handlePots() call to snap CCT/brightness.
     dutyFiltered = (float)prevDutyStep / (float)(NORMAL_STEPS - 1);
-    cctFiltered  = (currentCCT - 2700.0f) / (6500.0f - 2700.0f);
+    cctFiltered  = (float)prevCCTStep / 38.0f;
 
     // Also update ledmix targets to match, preventing fallthrough snap
     ledmix_set(currentBrightness, currentCCT);
+}
+
+void resetDumbFilter()
+{
+    dumbDutyFiltered = -1.0f;
+    dumbCCTFiltered  = -1.0f;
 }
