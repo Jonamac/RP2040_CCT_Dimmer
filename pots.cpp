@@ -25,8 +25,8 @@ static const float DUTY_STEP_HYST_ST    = 0.15f;  // Schmitt dead-band per side 
 static const float CCT_STEP_HYST_ST     = 0.15f;  // Schmitt dead-band per side (CCT)
 static const float DUMB_BRIGHTNESS_DB  = 0.005f;  // wider dead-band to suppress ADC noise
 static const float DUMB_CCT_DB         = 10.0f;   // 10 K CCT dead-band to suppress ADC noise
-static const float DUMB_DUTY_SNAP_LO   = 0.03f;   // endpoint snap: below this → clamp to 0
-static const float DUMB_DUTY_SNAP_HI   = 0.97f;   // endpoint snap: above this → clamp to 1
+static const float DUMB_DUTY_SNAP_LO   = 0.015f;  // endpoint snap: below this → clamp to 0
+static const float DUMB_DUTY_SNAP_HI   = 0.985f;  // endpoint snap: above this → clamp to 1
 static const float DUMB_CCT_CENTER_K   = 4600.0f; // center snap target (neutral CCT)
 static const float DUMB_CCT_CENTER_TOL = 75.0f;   // ±K around center that snaps to center
 
@@ -110,6 +110,8 @@ void handlePots(unsigned long now)
         // Endpoint snap zones — ensure full range is reachable
         if (dumbDutyFiltered < DUMB_DUTY_SNAP_LO) dumbDutyFiltered = 0.0f;
         if (dumbDutyFiltered > DUMB_DUTY_SNAP_HI) dumbDutyFiltered = 1.0f;
+        if (dumbCCTFiltered  < 0.01f)             dumbCCTFiltered  = 0.0f;   // snaps to 2700K at low end
+        if (dumbCCTFiltered  > 0.99f)             dumbCCTFiltered  = 1.0f;   // snaps to 6500K at high end
 
         float newB = min_duty + dumbDutyFiltered * (1.0f - min_duty);
         float newC = 2700.0f + dumbCCTFiltered  * (6500.0f - 2700.0f);

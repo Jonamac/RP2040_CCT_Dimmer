@@ -13,6 +13,13 @@
 #include "calibration.h"
 
 void setup() {
+    // Force PWM outputs low immediately — prevents any brief flash at power-on
+    // before the PWM hardware is properly initialized
+    pinMode(WARM_PIN, OUTPUT);
+    digitalWrite(WARM_PIN, LOW);
+    pinMode(COOL_PIN, OUTPUT);
+    digitalWrite(COOL_PIN, LOW);
+
     Serial.begin(115200);
     analogReadResolution(12);
 
