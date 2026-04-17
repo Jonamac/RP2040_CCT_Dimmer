@@ -93,7 +93,7 @@ static void handleMainButtonLogic(unsigned long now) {
             // No long fired → candidate short
             // DUMB MODE: short always goes to STANDBY immediately (no DJI delay)
             if (currentMode == MODE_DUMB) {
-                handleMainButtonRelease(held, now);
+                handleDumbToggle(now);
             } else {
                 // NORMAL / STANDBY / OVERRIDE / DEMO:
                 // DJI-style: short is pending, not immediate
@@ -112,7 +112,11 @@ static void handleMainButtonLogic(unsigned long now) {
         (now - mainShortTime) > SHORT_DECISION_DELAY_MS &&
         !mainComboActive) {
 
-        handleMainButtonRelease(mainShortHeldMs, now);
+        if (currentMode == MODE_STANDBY && previousMode == MODE_DUMB) {
+            handleDumbToggle(now);
+        } else {
+            handleMainButtonRelease(mainShortHeldMs, now);
+        }
         mainShortPending = false;
     }
 

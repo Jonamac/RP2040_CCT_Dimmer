@@ -68,14 +68,15 @@ Last updated: 2026-04-17
 ## Boot Sequence
 
 ### NORMAL boot
-1. Read DUTY ADC (32 samples) — brightness step doesn't require ADC settling
-2. Compute `targetB = normalBrightnessSteps[idx]`
-3. `ledmix_set(0, 4600.0f)` + `applyLEDsImmediate(0, 4600.0f)` + `ledmix_initCurrent()` — LEDs off, placeholder CCT (no visual effect at brightness 0)
-4. `buzzerStartupBeep()` (blocking, ~200–400ms) — this free settling time lets the RP2040 ADC input capacitor and voltage reference reach operating temperature
-5. Read CCT ADC (32 samples) **post-beep** — now settled; produces the same value that `syncPotsAfterBoot()` will read at fade-end
-6. Compute `startCCT`; `ledmix_set(0, startCCT)` + `ledmix_initCurrent()` — update with settled CCT
-7. Start `normalFadeActive` from 0 → targetB
-8. On fade complete: `systemInitialized = true`, `buzzer_click_enabled = true`, call `syncPotsAfterBoot()`, call `ledmix_initCurrent()` to sync `led_currentCCT`/`led_currentBrightness` to the post-boot targets, then call `applyLEDsImmediate(led_currentBrightness, led_currentCCT)` to re-render LEDs at the corrected CCT in the same frame
+1. `delay(500)` to let ADC input capacitance and voltage reference settle after power-on
+2. Read DUTY ADC (32 samples) — brightness step doesn't require ADC settling
+3. Compute `targetB = normalBrightnessSteps[idx]`
+4. `ledmix_set(0, 4600.0f)` + `applyLEDsImmediate(0, 4600.0f)` + `ledmix_initCurrent()` — LEDs off, placeholder CCT (no visual effect at brightness 0)
+5. `buzzerStartupBeep()` (blocking, ~200–400ms) — this free settling time lets the RP2040 ADC input capacitor and voltage reference reach operating temperature
+6. Read CCT ADC (32 samples) **post-beep** — now settled; produces the same value that `syncPotsAfterBoot()` will read at fade-end
+7. Compute `startCCT`; `ledmix_set(0, startCCT)` + `ledmix_initCurrent()` — update with settled CCT
+8. Start `normalFadeActive` from 0 → targetB
+9. On fade complete: `systemInitialized = true`, `buzzer_click_enabled = true`, call `syncPotsAfterBoot()`, call `ledmix_initCurrent()` to sync `led_currentCCT`/`led_currentBrightness` to the post-boot targets, then call `applyLEDsImmediate(led_currentBrightness, led_currentCCT)` to re-render LEDs at the corrected CCT in the same frame
 
 ### DUMB boot
 1. `delay(500)` to let ADC input capacitance and voltage reference settle after power-on
@@ -128,3 +129,70 @@ Last updated: 2026-04-17
 - `timing.h` / `.cpp` — timing init
 - `freq_mode.h` / `.cpp` — FREQ strobe mode
 - `docs/AI_NOTES.md` — this file
+
+## PR Plan (Original + Status)
+
+### Master Bug Register (original)
+
+| # | Severity | File(s) | Issue |
+|---|---|---|---|
+| 1 | 🔴 Critical | inputs.cpp | handleDumbSwitch() never called from readInputs() |
+| 2 | 🔴 Critical | inputs.cpp | handlePots() never called in DUMB mode |
+| 3 | 🔴 Critical | RP2040_CCT_Dimmer.ino | DUMB boot path never set currentMode = MODE_DUMB |
+| 4 | 🔴 Critical | RP2040_CCT_Dimmer.ino + ledmix.cpp | DUMB fade engine never ran |
+| 5 | 🔴 Critical | displayui.cpp | DUTY_PHYSICAL_MIN/MAX undefined — compile error |
+| 6 | 🟠 High | modes.cpp | STANDBY→NORMAL snapped instead of fading |
+| 7 | 🟠 High | modes.cpp | handleDumbSwitch() had no debounce/startup lockout/fade guard |
+| 8 | 🟠 High | inputs.cpp + pots.cpp | DUMB CCT never applied immediately |
+| 9 | 🟡 Medium | buzzer.cpp | buzzerModeChangeBeep() silenced in DUMB — DUMB→STANDBY beep broken |
+| 10 | 🟡 Medium | buzzer.cpp | buzzerQuietUntil never checked |
+| 11 | 🟡 Medium | calibration.cpp | normalBrightnessSteps[0] = 0.00, should be min_duty |
+| 12 | 🟡 Medium | displayui.cpp | DUTY% computed from physical PWM — should be targetBrightness * 100 |
+| 13 | 🟡 Medium | displayui.cpp | mDUTY uses exact equality — must use <= min_duty + epsilon |
+| 14 | 🟢 Low | modes.cpp | handleDumbToggle() doesn't exist — DUMB button logic not isolated |
+| 15 | 🟢 Low | modes.cpp | Dead code: second MODE_NORMAL branch in handleMainLongPress() |
+| 16 | 🟢 Low | modes.cpp | Dead code: lines 344–348 in handleDispButtonRelease() |
+| 17 | 🟢 Low | inputs.cpp | processPots() forward-declared but never defined or called |
+
+### PR Status
+
+| PR | Title | Status | Notes |
+|---|---|---|---|
+| PR 1 | readInputs() Foundation + DUMB Pots/Switch Wiring (bugs 1, 2, 8) | ✅ Done | Merged |
+| PR 2 | DUMB Switch Debounce + Startup Lockout (bug 7) | ✅ Done | Merged |
+| PR 3 | Boot Fix + Loop Guard + NORMAL Fade Engine (bugs 3, 4, 6) | ✅ Done | Merged + many hotfixes |
+| Hotfixes | Boot CCT snap, DUMB filter lag, display bugs, transitions | ✅ Done | PRs #4–#12 merged |
+| Boot CCT snap | CCT snaps 100K at end of startup fade | ⚠️ Parked | Persists after 8+ fix attempts; cosmetic; revisit in CAL mode era |
+| PR 4 | handleDumbToggle() Extraction (bug 14) | ✅ Done | |
+| PR 5 | Display Fixes: DUTY%, mDUTY (bugs 12, 13) | 📋 Planned | Some fixes already applied via hotfixes; verify/complete |
+| PR 6 | Brightness Table Rebuild (bug 11) | 📋 Planned | normalBrightnessSteps[0] should be min_duty; piecewise linear |
+| PR 7 | Buzzer Fixes + Code Cleanup (bugs 9, 10, 15, 16, 17) | 📋 Planned | |
+
+### PR 4 Detail — handleDumbToggle() Extraction
+- Extract DUMB-specific standby toggle block from `handleMainButtonRelease()` into `handleDumbToggle(unsigned long now)`
+- Declare in `modes.h`
+- Call from DUMB short-press path instead of routing through handleMainButtonRelease
+
+### PR 5 Detail — Display Fixes
+- DUTY%: `ledmix_getBrightness() * 100.0f` (= targetBrightness). Add `ledmix_getTargetBrightness()` getter if needed.
+- mDUTY: `(currentWarmDuty > 0 && currentWarmDuty <= min_duty + 0.0003f) || (currentCoolDuty > 0 && currentCoolDuty <= min_duty + 0.0003f)`
+- Note: Many display fixes already landed in hotfixes (DUMB DUTY pot-normalized, CCT 10K resolution, mode label position, STANDBY badge position, mDUTY position). Verify these are present before adding.
+
+### PR 6 Detail — Brightness Table Rebuild
+- Rebuild `normalBrightnessSteps[22]` as piecewise linear:
+  - Step 0 = min_duty (0.0453) — minimum stable PWM (not 0.00)
+  - Steps 0→11: linear from min_duty → 0.50
+  - Steps 11→21: linear from 0.50 → 1.0
+  - Step 11 = 0.50 exactly (knob at 12 o'clock → DUTY = 50.00%)
+  - Perceptual uniformity from applyGamma() in ledmix.cpp
+
+### PR 7 Detail — Buzzer Fixes + Cleanup
+- Remove `if (currentMode == MODE_DUMB) return` from `buzzerModeChangeBeep()` only (keep in buzzerClick())
+- Add `buzzerQuietUntil` check to `buzzerModeChangeBeep()` and `buzzerLEDUpdateBeep()`
+- Remove dead second MODE_NORMAL branch in `handleMainLongPress()`
+- Remove unreachable block in `handleDispButtonRelease()`
+- Remove `processPots()` forward declaration from `inputs.cpp`
+
+### Known Issues (Parked)
+- **Boot CCT snap**: CCT snaps 100K at end of startup fade in NORMAL mode. Cosmetic (1 step, 100K). Root cause: RP2040 ADC cold-start reading is consistently 1 step lower than warm reading; by fade-end the pot reads correctly and triggers a Schmitt step. Multiple fix attempts failed. Revisit when CAL mode is implemented (CAL mode will let user set true ADC endpoints and may eliminate the mismatch).
+- **Cool white channel PWM ~5ns shorter than warm white**: PCB trace length asymmetry between the two GPIO pins. Cannot be fixed in software at this precision.
