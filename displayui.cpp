@@ -46,7 +46,7 @@ void initDisplay() {
 // ------------------------------------------------------------
 static void drawStandbyBadge() {
     display.setTextSize(1);
-    display.setCursor(86, 23); 
+    display.setCursor(78, 20);   // was (86, 23) — now right-aligned on CCT line row, no collision
     display.print("STANDBY");
 }
 
@@ -79,13 +79,11 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
     display.print("DUTY ");
     float displayDutyPercent;
     if (currentMode == MODE_DUMB || (currentMode == MODE_STANDBY && previousMode == MODE_DUMB)) {
-        // Show actual PWM duty of the dominant channel, matching oscilloscope reading.
-        // When CCT splits power across warm/cool channels, per-channel duty is lower
-        // than logical brightness. This shows the real electrical duty on either channel.
-        float warmD = ledmix_getWarmDuty();
-        float coolD = ledmix_getCoolDuty();
-        displayDutyPercent = max(warmD, coolD) * 100.0f;
-        displayDutyPercent = constrain(displayDutyPercent, 0.01f, 100.0f);
+        // Normalize: 0.01% at pot-minimum (rawB=min_duty), 100% at pot-maximum (rawB=1.0)
+        float rawB = ledmix_getBrightness();
+        float range = 1.0f - min_duty;
+        float norm = (range > 0.0f) ? constrain((rawB - min_duty) / range, 0.0f, 1.0f) : 0.0f;
+        displayDutyPercent = max(norm * 100.0f, 0.01f);
     } else {
         // NORMAL / STANDBY(from NORMAL) / DEMO / FREQ / etc: raw brightness * 100
         displayDutyPercent = ledmix_getBrightness() * 100.0f;
@@ -117,14 +115,25 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
         display.print("K");
     }
 
-    if (currentWarmDuty == min_duty || currentCoolDuty == min_duty) {
-        display.setCursor(94, 2);  // was 100 — moved left to prevent "Y" wrapping
+    // mDUTY: show when brightness is at the hardware minimum floor
+    bool showMDuty = false;
+    if (currentMode == MODE_DUMB || (currentMode == MODE_STANDBY && previousMode == MODE_DUMB)) {
+        // In DUMB, detect pot-minimum by brightness == min_duty (exact when dumbDutyFiltered snapped to 0).
+        // Tolerance of 0.001 covers floating-point rounding while remaining tighter than one DUMB dead-band step.
+        float rawB = ledmix_getBrightness();
+        showMDuty = (rawB <= min_duty + 0.001f && rawB >= min_duty - 0.001f);
+    } else {
+        // In NORMAL/DEMO/etc, use the linear channel duty comparison (unchanged behaviour)
+        showMDuty = (currentWarmDuty == min_duty || currentCoolDuty == min_duty);
+    }
+    if (showMDuty) {
+        display.setCursor(94, 2);
         display.print("mDUTY");
     }
 
     // Main mode label (NORMAL, DUMB, DEMO, FREQ, CAL)
     if (modeLabel && strlen(modeLabel) > 0) {
-        display.setCursor(90, 20);
+        display.setCursor(90, 12);
         display.print(modeLabel);
     }
 

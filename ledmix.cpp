@@ -62,7 +62,7 @@ void applyLEDsImmediate(float brightness, float cct)
     if (brightness > 1.0f) brightness = 1.0f;
 
     bool useGamma =
-        !(currentMode == MODE_FREQ || currentMode == MODE_CAL || currentMode == MODE_DUMB);
+        !(currentMode == MODE_FREQ || currentMode == MODE_CAL);
 
     float B_linear     = brightness;
     float B_perceptual = useGamma ? applyGamma(B_linear) : B_linear;
@@ -203,6 +203,7 @@ void updateLEDLogic(unsigned long now)
                 buzzer_click_enabled = true;  // enable clicks after NORMAL boot
                 syncPotsAfterBoot(normalFadeEndB, led_currentCCT);
                 ledmix_initCurrent();  // sync current to updated target; prevents 1-frame CCT snap
+                applyLEDsImmediate(led_currentBrightness, led_currentCCT);  // re-render at corrected CCT same frame — no snap
             }
         }
 
