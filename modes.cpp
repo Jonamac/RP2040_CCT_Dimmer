@@ -90,8 +90,8 @@ void handleDumbSwitch(unsigned long now) {
             dutySum += analogRead(DUTY_POT_PIN);
             cctSum  += analogRead(CCT_POT_PIN);
         }
-        float dN = constrain((dutySum/8 - DUTY_MIN_RAW) / float(DUTY_MAX_RAW - DUTY_MIN_RAW), 0.0f, 1.0f);
-        float cN = constrain((cctSum/8  - CCT_MIN_RAW)  / float(CCT_MAX_RAW  - CCT_MIN_RAW),  0.0f, 1.0f);
+        float dN = constrain((dutySum/8.0f - DUTY_MIN_RAW) / float(DUTY_MAX_RAW - DUTY_MIN_RAW), 0.0f, 1.0f);
+        float cN = constrain((cctSum/8.0f  - CCT_MIN_RAW)  / float(CCT_MAX_RAW  - CCT_MIN_RAW),  0.0f, 1.0f);
         float newB = constrain(min_duty + dN * (1.0f - min_duty), min_duty, 1.0f);
         float newC = constrain(2700.0f + cN * (6500.0f - 2700.0f), 2700.0f, 6500.0f);
         ledmix_set(newB, newC);
@@ -115,12 +115,12 @@ void handleDumbSwitch(unsigned long now) {
                 dutySum += analogRead(DUTY_POT_PIN);
                 cctSum  += analogRead(CCT_POT_PIN);
             }
-            float dutyNorm = constrain((dutySum/8 - DUTY_MIN_RAW) /
+            float dutyNorm = constrain((dutySum/8.0f - DUTY_MIN_RAW) /
                                        float(DUTY_MAX_RAW - DUTY_MIN_RAW), 0.0f, 1.0f);
             int idx = constrain((int)round(dutyNorm * (NORMAL_STEPS - 1)), 0, NORMAL_STEPS - 1);
             float newB = normalBrightnessSteps[idx];
 
-            float cctNorm = constrain((cctSum/8 - CCT_MIN_RAW) /
+            float cctNorm = constrain((cctSum/8.0f - CCT_MIN_RAW) /
                                       float(CCT_MAX_RAW - CCT_MIN_RAW), 0.0f, 1.0f);
             int stepIndex = constrain((int)round(cctNorm * 38.0f), 0, 38);
             float newC = 2700.0f + stepIndex * 100.0f;
