@@ -42,17 +42,19 @@ void setup() {
         buzzer_beep_enabled  = false;
 
         // Allow ADC input capacitance and voltage reference to settle after power-on.
-        delay(100);
+        delay(500);
 
-        // Average 16 readings for stable boot-time pot values
+        // Average 32 readings for stable boot-time pot values
         // (single samples are too noisy at 12-bit resolution)
         int dutySum = 0, cctSum = 0;
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < 32; i++) {
             dutySum += analogRead(DUTY_POT_PIN);
             cctSum  += analogRead(CCT_POT_PIN);
         }
-        int rawDutyADC = dutySum / 16;
-        int rawCCTADC  = cctSum  / 16;
+        int rawDutyADC = dutySum / 32;
+        int rawCCTADC  = cctSum  / 32;
+        Serial.print("Boot ADC — DUTY raw: "); Serial.print(rawDutyADC);
+        Serial.print(" | CCT raw: "); Serial.println(rawCCTADC);
 
         float dutyNorm = constrain(
             (rawDutyADC - DUTY_MIN_RAW) / float(DUTY_MAX_RAW - DUTY_MIN_RAW),
@@ -89,17 +91,19 @@ void setup() {
     buzzer_beep_enabled  = true;
 
     // Allow ADC input capacitance and voltage reference to settle after power-on.
-    delay(100);
+    delay(500);
 
-    // Average 16 readings for stable boot-time pot values
+    // Average 32 readings for stable boot-time pot values
     // (single samples are too noisy at 12-bit resolution)
     int dutySum = 0, cctSum = 0;
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < 32; i++) {
         dutySum += analogRead(DUTY_POT_PIN);
         cctSum  += analogRead(CCT_POT_PIN);
     }
-    int rawDutyADC = dutySum / 16;
-    int rawCCTADC  = cctSum  / 16;
+    int rawDutyADC = dutySum / 32;
+    int rawCCTADC  = cctSum  / 32;
+    Serial.print("Boot ADC — DUTY raw: "); Serial.print(rawDutyADC);
+    Serial.print(" | CCT raw: "); Serial.println(rawCCTADC);
 
     float dutyNorm = constrain(
         (rawDutyADC - DUTY_MIN_RAW) / float(DUTY_MAX_RAW - DUTY_MIN_RAW),

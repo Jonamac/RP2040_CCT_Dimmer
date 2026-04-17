@@ -103,7 +103,13 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
         // Normal CCT line
         display.setCursor(0, 20);
         display.print("CCT ");
-        int cctRounded = (int)(round(dispC / 100.0f) * 100.0f);
+        // CCT display: continuous in DUMB (round to 10K), stepped in NORMAL (round to 100K)
+        int cctRounded;
+        if (currentMode == MODE_DUMB || (currentMode == MODE_STANDBY && previousMode == MODE_DUMB)) {
+            cctRounded = (int)(round(dispC / 10.0f) * 10.0f);   // continuous: 10K resolution
+        } else {
+            cctRounded = (int)(round(dispC / 100.0f) * 100.0f); // stepped: 100K resolution
+        }
         display.print(cctRounded);
         display.print("K");
     }

@@ -25,6 +25,10 @@ static const float DUTY_STEP_HYST_ST    = 0.15f;  // Schmitt dead-band per side 
 static const float CCT_STEP_HYST_ST     = 0.15f;  // Schmitt dead-band per side (CCT)
 static const float DUMB_BRIGHTNESS_DB  = 0.005f;  // wider dead-band to suppress ADC noise
 static const float DUMB_CCT_DB         = 10.0f;   // 10 K CCT dead-band to suppress ADC noise
+static const float DUMB_DUTY_SNAP_LO   = 0.03f;   // endpoint snap: below this → clamp to 0
+static const float DUMB_DUTY_SNAP_HI   = 0.97f;   // endpoint snap: above this → clamp to 1
+static const float DUMB_CCT_CENTER_K   = 4600.0f; // center snap target (neutral CCT)
+static const float DUMB_CCT_CENTER_TOL = 75.0f;   // ±K around center that snaps to center
 
 // IIR filter state — file-scope so syncPotsAfterBoot() can seed them
 static float dutyFiltered = -1.0f;
@@ -90,23 +94,31 @@ void handlePots(unsigned long now)
 
         // Single adaptive IIR for DUMB mode, applied to raw (pre-shared-IIR) ADC values.
         // α=0.40 when moving (delta > 0.005, ~20 ADC counts) → ~2.5-frame lag, analog-feel.
-        // α=0.10 when settled → ~10-frame smoothing, suppresses ADC noise.
+        // α=0.05 when settled → ~20-frame smoothing, suppresses ADC noise.
         if (dumbDutyFiltered < 0.0f) {
             dumbDutyFiltered = rawDutyNorm;
             dumbCCTFiltered  = rawCCTNorm;
         } else {
             float dDutyDelta = fabsf(rawDutyNorm - dumbDutyFiltered);
             float dCCTDelta  = fabsf(rawCCTNorm  - dumbCCTFiltered);
-            float dDutyAlpha = (dDutyDelta > 0.005f) ? 0.40f : 0.10f;
-            float dCCTAlpha  = (dCCTDelta  > 0.005f) ? 0.40f : 0.10f;
+            float dDutyAlpha = (dDutyDelta > 0.005f) ? 0.40f : 0.05f;   // was 0.10 settled
+            float dCCTAlpha  = (dCCTDelta  > 0.005f) ? 0.40f : 0.05f;   // was 0.10 settled
             dumbDutyFiltered = dumbDutyFiltered * (1.0f - dDutyAlpha) + rawDutyNorm * dDutyAlpha;
             dumbCCTFiltered  = dumbCCTFiltered  * (1.0f - dCCTAlpha)  + rawCCTNorm  * dCCTAlpha;
         }
 
+        // Endpoint snap zones — ensure full range is reachable
+        if (dumbDutyFiltered < DUMB_DUTY_SNAP_LO) dumbDutyFiltered = 0.0f;
+        if (dumbDutyFiltered > DUMB_DUTY_SNAP_HI) dumbDutyFiltered = 1.0f;
+
         float newB = min_duty + dumbDutyFiltered * (1.0f - min_duty);
         float newC = 2700.0f + dumbCCTFiltered  * (6500.0f - 2700.0f);
 
-        // Clamp to valid range — calibrated pots + filter make snap zones unnecessary
+        // Soft center snap: within ±DUMB_CCT_CENTER_TOL of neutral CCT snaps to center exactly.
+        // Makes it easy to find and hold neutral CCT without being too restrictive.
+        if (fabsf(newC - DUMB_CCT_CENTER_K) < DUMB_CCT_CENTER_TOL) newC = DUMB_CCT_CENTER_K;
+
+        // Clamp to valid range
         newB = constrain(newB, min_duty, 1.0f);
         newC = constrain(newC, 2700.0f, 6500.0f);
 
@@ -220,6 +232,13 @@ void syncPotsAfterBoot(float brightness, float cct)
     currentBrightness = normalBrightnessSteps[prevDutyStep];
     prevCCTStep       = constrain((int)roundf(cctFiltered * 38.0f), 0, 38);
     currentCCT        = 2700.0f + prevCCTStep * 100.0f;
+
+    Serial.print("syncPotsAfterBoot ADC — DUTY raw: "); Serial.print(dutySum / 8);
+    Serial.print(" | CCT raw: "); Serial.println(cctSum / 8);
+    Serial.print("  → dutyFiltered: "); Serial.print(dutyFiltered, 4);
+    Serial.print(" | cctFiltered: "); Serial.println(cctFiltered, 4);
+    Serial.print("  → prevDutyStep: "); Serial.print(prevDutyStep);
+    Serial.print(" | prevCCTStep: "); Serial.println(prevCCTStep);
 
     // Update ledmix to the derived values.
     // If post-boot ADC differs from boot-time ADC, this may shift CCT/brightness
