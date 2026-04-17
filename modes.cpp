@@ -89,6 +89,12 @@ void handleDumbSwitch(unsigned long now) {
         if (currentMode == MODE_DUMB) {
             currentMode = MODE_NORMAL;
 
+            // Re-enable buzzer when switching from DUMB to NORMAL.
+            // buzzer_beep_enabled is false after a DUMB boot and must be
+            // restored so NORMAL mode transitions beep correctly.
+            buzzer_beep_enabled  = true;
+            buzzer_click_enabled = true;
+
             // Sample pots and snap to NORMAL state
             int rawDutyADC = readADC(DUTY_POT_PIN);
             float dutyNorm = (rawDutyADC - DUTY_MIN_RAW) /
@@ -138,10 +144,7 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
 
             ledmix_set(0.0f, ledmix_getCCT());
 
-            if (systemInitialized) {
-                buzzerModeChangeBeep();
-                buzzerQuietUntil = millis() + 200;
-            }
+            // DUMB mode transitions are always silent — no buzzer
         }
         return;
     }
@@ -234,9 +237,9 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
 
             ledmix_set(newB, newC);
 
-            // Start NORMAL fade UP from min_duty
+            // Start NORMAL fade UP from min_duty (or 0 if target is below min_duty)
             normalFadeActive    = true;
-            normalFadeStartB    = min_duty;
+            normalFadeStartB    = constrain(min_duty, 0.0f, newB);
             normalFadeEndB      = newB;
             normalFadeStartTime = now;
             normalFadeDuration  = standby_fade_time_ms;
@@ -320,7 +323,7 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
         ledmix_set(newB, newC);
 
         normalFadeActive    = true;
-        normalFadeStartB    = min_duty;
+        normalFadeStartB    = constrain(min_duty, 0.0f, newB);
         normalFadeEndB      = newB;
         normalFadeStartTime = now;
         normalFadeDuration  = standby_fade_time_ms;
