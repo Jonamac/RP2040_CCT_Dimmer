@@ -79,13 +79,10 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
     display.print("DUTY ");
     float displayDutyPercent;
     if (currentMode == MODE_DUMB || (currentMode == MODE_STANDBY && previousMode == MODE_DUMB)) {
-        // Show actual PWM duty of the dominant channel, matching oscilloscope reading.
-        // When CCT splits power across warm/cool channels, the per-channel duty is lower
-        // than the logical brightness. This shows the real electrical duty on either channel.
-        float warmD = ledmix_getWarmDuty();
-        float coolD = ledmix_getCoolDuty();
-        displayDutyPercent = max(warmD, coolD) * 100.0f;
-        displayDutyPercent = constrain(displayDutyPercent, 0.01f, 100.0f);
+        // Normalize: 0.01% at pot-minimum (rawB=min_duty), 100% at pot-maximum (rawB=1.0)
+        float rawB = ledmix_getBrightness();
+        float norm = constrain((rawB - min_duty) / (1.0f - min_duty), 0.0f, 1.0f);
+        displayDutyPercent = max(norm * 100.0f, 0.01f);
     } else {
         // NORMAL / STANDBY(from NORMAL) / DEMO / FREQ / etc: raw brightness * 100
         displayDutyPercent = ledmix_getBrightness() * 100.0f;
@@ -97,14 +94,14 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
     // FREQ MODE DISPLAY
     // =====================
     if (currentMode == MODE_FREQ) {
-        display.setCursor(0, 12);
+        display.setCursor(0, 20);
         display.print("FREQ ");
         display.print(freqStrobeHz, 3);
         display.print("Hz");
     }
     else {
         // Normal CCT line
-        display.setCursor(0, 12);
+        display.setCursor(0, 20);
         display.print("CCT ");
         int cctRounded = (int)(round(dispC / 100.0f) * 100.0f);
         display.print(cctRounded);
@@ -118,7 +115,7 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
 
     // Main mode label (NORMAL, DUMB, DEMO, FREQ, CAL)
     if (modeLabel && strlen(modeLabel) > 0) {
-        display.setCursor(90, 12);
+        display.setCursor(90, 20);
         display.print(modeLabel);
     }
 

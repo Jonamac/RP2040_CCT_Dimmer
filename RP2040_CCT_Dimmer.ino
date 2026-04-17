@@ -41,6 +41,9 @@ void setup() {
         buzzer_click_enabled = false;
         buzzer_beep_enabled  = false;
 
+        // Allow ADC input capacitance and voltage reference to settle after power-on.
+        delay(100);
+
         // Average 16 readings for stable boot-time pot values
         // (single samples are too noisy at 12-bit resolution)
         int dutySum = 0, cctSum = 0;
@@ -84,6 +87,9 @@ void setup() {
     // -------------------------------------------------------
     buzzer_click_enabled = false;
     buzzer_beep_enabled  = true;
+
+    // Allow ADC input capacitance and voltage reference to settle after power-on.
+    delay(100);
 
     // Average 16 readings for stable boot-time pot values
     // (single samples are too noisy at 12-bit resolution)
