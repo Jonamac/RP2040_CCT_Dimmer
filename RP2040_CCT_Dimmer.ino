@@ -41,14 +41,21 @@ void setup() {
         buzzer_click_enabled = false;
         buzzer_beep_enabled  = false;
 
-        // Read pots directly (handlePots is frozen until systemInitialized)
-        int rawDutyADC = analogRead(DUTY_POT_PIN);
+        // Average 16 readings for stable boot-time pot values
+        // (single samples are too noisy at 12-bit resolution)
+        int dutySum = 0, cctSum = 0;
+        for (int i = 0; i < 16; i++) {
+            dutySum += analogRead(DUTY_POT_PIN);
+            cctSum  += analogRead(CCT_POT_PIN);
+        }
+        int rawDutyADC = dutySum / 16;
+        int rawCCTADC  = cctSum  / 16;
+
         float dutyNorm = constrain(
             (rawDutyADC - DUTY_MIN_RAW) / float(DUTY_MAX_RAW - DUTY_MIN_RAW),
             0.0f, 1.0f);
         float endB = min_duty + dutyNorm * (1.0f - min_duty);
 
-        int rawCCTADC = analogRead(CCT_POT_PIN);
         float cctNorm = constrain(
             (rawCCTADC - CCT_MIN_RAW) / float(CCT_MAX_RAW - CCT_MIN_RAW),
             0.0f, 1.0f);
@@ -78,8 +85,16 @@ void setup() {
     buzzer_click_enabled = false;
     buzzer_beep_enabled  = true;
 
-    // Read pots directly for boot target
-    int rawDutyADC = analogRead(DUTY_POT_PIN);
+    // Average 16 readings for stable boot-time pot values
+    // (single samples are too noisy at 12-bit resolution)
+    int dutySum = 0, cctSum = 0;
+    for (int i = 0; i < 16; i++) {
+        dutySum += analogRead(DUTY_POT_PIN);
+        cctSum  += analogRead(CCT_POT_PIN);
+    }
+    int rawDutyADC = dutySum / 16;
+    int rawCCTADC  = cctSum  / 16;
+
     float dutyNorm = constrain(
         (rawDutyADC - DUTY_MIN_RAW) / float(DUTY_MAX_RAW - DUTY_MIN_RAW),
         0.0f, 1.0f);
@@ -87,7 +102,6 @@ void setup() {
     idx = constrain(idx, 0, NORMAL_STEPS - 1);
     float targetB = normalBrightnessSteps[idx];
 
-    int rawCCTADC = analogRead(CCT_POT_PIN);
     float cctNorm = constrain(
         (rawCCTADC - CCT_MIN_RAW) / float(CCT_MAX_RAW - CCT_MIN_RAW),
         0.0f, 1.0f);

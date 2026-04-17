@@ -21,13 +21,10 @@
 float lastDutyNorm = 0.0f;
 float lastCCTNorm  = 0.0f;
 
-static const float DUTY_STEP_HYST      = 0.05f;   // 5% of a step
-static const float CCT_STEP_HYST       = 0.05f;
+static const float DUTY_STEP_HYST_ST    = 0.15f;  // Schmitt dead-band per side (duty)
+static const float CCT_STEP_HYST_ST     = 0.15f;  // Schmitt dead-band per side (CCT)
 static const float DUMB_BRIGHTNESS_DB  = 0.003f;  // 0.3% brightness dead-band for ADC noise
 static const float DUMB_CCT_DB         = 5.0f;    // 5 K CCT dead-band for ADC noise
-// Snap multiplier for DUMB minimum: newB < min_duty * this → snap to min_duty.
-// 3.0× covers ADC floors up to ~dutyNorm 0.095 (ADC ~400 counts above DUTY_MIN_RAW).
-static const float DUMB_MIN_SNAP_MULT  = 3.0f;
 
 // IIR filter state — file-scope so syncPotsAfterBoot() can seed them
 static float dutyFiltered = -1.0f;
@@ -91,12 +88,9 @@ void handlePots(unsigned long now)
         float newB = min_duty + dumbDutyFiltered * (1.0f - min_duty);
         float newC = 2700.0f + dumbCCTFiltered  * (6500.0f - 2700.0f);
 
-        // Snap to exact endpoints to compensate for ADC mechanical limits.
-        // The pot floor may not reach DUTY_MIN_RAW, giving newB slightly above
-        // min_duty. Snap any value within 3.0x min_duty to exactly min_duty.
-        // Snap anything above 0.99 to exactly 1.0.
-        if (newB < min_duty * DUMB_MIN_SNAP_MULT) newB = min_duty;
-        if (newB > 0.99f)           newB = 1.0f;
+        // Clamp to valid range — calibrated pots + filter make snap zones unnecessary
+        newB = constrain(newB, min_duty, 1.0f);
+        newC = constrain(newC, 2700.0f, 6500.0f);
 
         static float prevDumbB = -1.0f;
         static float prevDumbC = -1.0f;
@@ -122,29 +116,65 @@ void handlePots(unsigned long now)
     // -------------------------
     float mappedCCT = 2700.0f + cctNorm * (6500.0f - 2700.0f);
 
-    // Duty: 22 steps (0..NORMAL_STEPS-1) with hysteresis
-    // Use normalBrightnessSteps for consistency with STANDBY exit calculation
-    float dutyStepFloat     = dutyNorm * (NORMAL_STEPS - 1);
-    int   dutyStepCandidate = roundf(dutyStepFloat);
-    dutyStepCandidate = constrain(dutyStepCandidate, 0, NORMAL_STEPS - 1);
+    // Duty: NORMAL_STEPS steps with Schmitt-trigger hysteresis.
+    // Up-step:   must cross N + 0.5 + DUTY_STEP_HYST_ST
+    // Down-step: must cross N - 0.5 - DUTY_STEP_HYST_ST
+    // This prevents oscillation at step boundaries.
+    bool dutyFirstCall = (prevDutyStep < 0);
 
-    if (fabsf(dutyStepFloat - (float)prevDutyStep) > DUTY_STEP_HYST) {
-        if (dutyStepCandidate != prevDutyStep) {
-            prevDutyStep      = dutyStepCandidate;
-            currentBrightness = normalBrightnessSteps[prevDutyStep];
-            buzzerClick();
-        }
+    float dutyStepFloat     = dutyNorm * (NORMAL_STEPS - 1);
+    int   dutyStepCandidate = constrain((int)roundf(dutyStepFloat), 0, NORMAL_STEPS - 1);
+
+    bool dutyStepChanged = false;
+    if (prevDutyStep < 0) {
+        // First call — commit immediately
+        prevDutyStep      = dutyStepCandidate;
+        currentBrightness = normalBrightnessSteps[prevDutyStep];
+        dutyStepChanged   = true;
+    } else if (dutyStepCandidate > prevDutyStep &&
+               dutyStepFloat > (float)prevDutyStep + 0.5f + DUTY_STEP_HYST_ST) {
+        prevDutyStep      = dutyStepCandidate;
+        currentBrightness = normalBrightnessSteps[prevDutyStep];
+        dutyStepChanged   = true;
+    } else if (dutyStepCandidate < prevDutyStep &&
+               dutyStepFloat < (float)prevDutyStep - 0.5f - DUTY_STEP_HYST_ST) {
+        prevDutyStep      = dutyStepCandidate;
+        currentBrightness = normalBrightnessSteps[prevDutyStep];
+        dutyStepChanged   = true;
     }
 
-    // CCT: 39 steps (2700..6500 K, 100 K each) with hysteresis
-    float cctStepFloat     = (mappedCCT - 2700.0f) / 100.0f;
-    int   cctStepCandidate = roundf(cctStepFloat);
+    if (dutyStepChanged && !dutyFirstCall && systemInitialized) {
+        buzzerClick();
+    }
 
-    if (fabsf(cctStepFloat - (float)prevCCTStep) > CCT_STEP_HYST) {
-        if (cctStepCandidate != prevCCTStep) {
-            prevCCTStep = cctStepCandidate;
-            currentCCT  = 2700.0f + prevCCTStep * 100.0f;
-        }
+    // CCT: 39 steps (2700..6500 K, 100 K each) with Schmitt-trigger hysteresis.
+    // Up-step:   must cross N + 0.5 + CCT_STEP_HYST_ST
+    // Down-step: must cross N - 0.5 - CCT_STEP_HYST_ST
+    bool cctFirstCall = (prevCCTStep < 0);
+
+    float cctStepFloat     = (mappedCCT - 2700.0f) / 100.0f;
+    int   cctStepCandidate = constrain((int)roundf(cctStepFloat), 0, 38);
+
+    bool cctStepChanged = false;
+    if (prevCCTStep < 0) {
+        // First call — commit immediately
+        prevCCTStep    = cctStepCandidate;
+        currentCCT     = 2700.0f + prevCCTStep * 100.0f;
+        cctStepChanged = true;
+    } else if (cctStepCandidate > prevCCTStep &&
+               cctStepFloat > (float)prevCCTStep + 0.5f + CCT_STEP_HYST_ST) {
+        prevCCTStep    = cctStepCandidate;
+        currentCCT     = 2700.0f + prevCCTStep * 100.0f;
+        cctStepChanged = true;
+    } else if (cctStepCandidate < prevCCTStep &&
+               cctStepFloat < (float)prevCCTStep - 0.5f - CCT_STEP_HYST_ST) {
+        prevCCTStep    = cctStepCandidate;
+        currentCCT     = 2700.0f + prevCCTStep * 100.0f;
+        cctStepChanged = true;
+    }
+
+    if (cctStepChanged && !cctFirstCall && systemInitialized) {
+        buzzerClick();
     }
 
     // NORMAL uses the fade/LED engine — do not call applyLEDsImmediate here
