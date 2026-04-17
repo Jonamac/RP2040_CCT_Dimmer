@@ -56,6 +56,10 @@ void handlePots(unsigned long now)
     dutyNorm = constrain(dutyNorm, 0.0f, 1.0f);
     cctNorm  = constrain(cctNorm,  0.0f, 1.0f);
 
+    // Save raw (pre-IIR) normalized values for DUMB mode — prevents cascade double-filter
+    float rawDutyNorm = dutyNorm;
+    float rawCCTNorm  = cctNorm;
+
     if (dutyFiltered < 0.0f) {
         // No seed — first real call, seed filter from raw ADC (no averaging artifact)
         dutyFiltered = dutyNorm;
@@ -84,14 +88,19 @@ void handlePots(unsigned long now)
         // Do not fight an active DUMB fade
         if (dumbFadeActive) return;
 
-        // Apply a second, stronger IIR pass for DUMB mode to suppress ADC noise.
-        // α = 0.05 means 5% new data per frame → much smoother than shared filter.
+        // Single adaptive IIR for DUMB mode, applied to raw (pre-shared-IIR) ADC values.
+        // α=0.40 when moving (delta > 0.005, ~20 ADC counts) → ~2.5-frame lag, analog-feel.
+        // α=0.10 when settled → ~10-frame smoothing, suppresses ADC noise.
         if (dumbDutyFiltered < 0.0f) {
-            dumbDutyFiltered = dutyNorm;
-            dumbCCTFiltered  = cctNorm;
+            dumbDutyFiltered = rawDutyNorm;
+            dumbCCTFiltered  = rawCCTNorm;
         } else {
-            dumbDutyFiltered = dumbDutyFiltered * 0.95f + dutyNorm * 0.05f;
-            dumbCCTFiltered  = dumbCCTFiltered  * 0.95f + cctNorm  * 0.05f;
+            float dDutyDelta = fabsf(rawDutyNorm - dumbDutyFiltered);
+            float dCCTDelta  = fabsf(rawCCTNorm  - dumbCCTFiltered);
+            float dDutyAlpha = (dDutyDelta > 0.005f) ? 0.40f : 0.10f;
+            float dCCTAlpha  = (dCCTDelta  > 0.005f) ? 0.40f : 0.10f;
+            dumbDutyFiltered = dumbDutyFiltered * (1.0f - dDutyAlpha) + rawDutyNorm * dDutyAlpha;
+            dumbCCTFiltered  = dumbCCTFiltered  * (1.0f - dCCTAlpha)  + rawCCTNorm  * dCCTAlpha;
         }
 
         float newB = min_duty + dumbDutyFiltered * (1.0f - min_duty);
@@ -210,11 +219,18 @@ void syncPotsAfterBoot(float brightness, float cct)
     prevCCTStep = cctStep;
     currentCCT  = 2700.0f + cctStep * 100.0f;
 
-    // Seed IIR filters from committed step values — NOT from ADC.
-    // Seeding from ADC can land on a different step than setup() computed,
-    // causing the very first handlePots() call to snap CCT/brightness.
-    dutyFiltered = (float)prevDutyStep / (float)(NORMAL_STEPS - 1);
-    cctFiltered  = (float)prevCCTStep / 38.0f;
+    // Seed IIR filters from a fresh 8-sample ADC average.
+    // Step-index seeding caused a mismatch vs the first handlePots() ADC read:
+    // if the delta exceeded 0.01 normalized (~41 counts), fast alpha (0.60) fired
+    // the Schmitt trigger immediately → CCT/brightness snap on first frame.
+    // Seeding from ADC means first-frame delta ≈ 0 → always slow alpha → no snap.
+    int dutySum = 0, cctSum = 0;
+    for (int i = 0; i < 8; i++) {
+        dutySum += analogRead(DUTY_POT_PIN);
+        cctSum  += analogRead(CCT_POT_PIN);
+    }
+    dutyFiltered = constrain((dutySum / 8.0f - DUTY_MIN_RAW) / float(DUTY_MAX_RAW - DUTY_MIN_RAW), 0.0f, 1.0f);
+    cctFiltered  = constrain((cctSum  / 8.0f - CCT_MIN_RAW)  / float(CCT_MAX_RAW  - CCT_MIN_RAW),  0.0f, 1.0f);
 
     // Also update ledmix targets to match, preventing fallthrough snap
     ledmix_set(currentBrightness, currentCCT);

@@ -44,7 +44,7 @@ Last updated: 2026-04-17
 
 - Brightness: continuous, `min_duty + dutyNorm * (1 - min_duty)`, applied immediately
 - CCT: continuous 2700K–6500K, applied immediately
-- No gamma in DUMB; dedicated IIR filter (α=0.05) + dead-band (0.003 brightness, 5K CCT)
+- No gamma in DUMB; dedicated adaptive IIR filter (α=0.10 settled / α=0.40 moving, threshold 0.005, applied to RAW ADC normalized values) + dead-band (0.003 brightness, 5K CCT)
 - No buzzer clicks or beeps in DUMB (except `buzzerStartupBeep` at NORMAL boot, which ignores flags)
 - DUMB display: actual PWM duty of dominant channel — `max(ledmix_getWarmDuty(), ledmix_getCoolDuty()) * 100`, floored at 0.01%
 - DUMB maximum: constrain `newB` to `[min_duty, 1.0]` — do NOT add snap zones (pots are calibrated)
@@ -81,15 +81,17 @@ Last updated: 2026-04-17
 ## Pot Filter Architecture (pots.cpp)
 
 - Shared IIR filter: `dutyFiltered`, `cctFiltered`, adaptive α (0.10 settled / 0.60 moving, threshold delta > 0.01) — used for NORMAL mode step logic
-- DUMB-specific IIR: `dumbDutyFiltered`, `dumbCCTFiltered`, α=0.05 — used for DUMB mode only
+- DUMB-specific IIR: `dumbDutyFiltered`, `dumbCCTFiltered`, adaptive α (0.10 settled / 0.40 moving, threshold delta > 0.005) — applied to **raw (pre-shared-IIR) ADC normalized values**, NOT to shared filter output
 - All four filters are **file-scope statics** in `pots.cpp` — NOT static locals inside `handlePots()`
-- `syncPotsAfterBoot(brightness, cct)`: called when NORMAL boot fade completes. Seeds filters from step values (NOT from ADC re-read) to prevent snap on first `handlePots()` call.
+- `rawDutyNorm` / `rawCCTNorm`: local variables saved immediately after `constrain` in `handlePots()`, before the shared IIR block overwrites `dutyNorm`/`cctNorm` — these are the DUMB IIR inputs
+- `syncPotsAfterBoot(brightness, cct)`: called when NORMAL boot fade completes. Seeds `prevDutyStep`/`prevCCTStep` from step math (correct, unchanged). Seeds **IIR filters (`dutyFiltered`/`cctFiltered`) from a fresh 8-sample ADC average** — so the first `handlePots()` call sees delta ≈ 0 → slow alpha → Schmitt trigger cannot fire immediately → no boot snap.
 - `resetDumbFilter()`: resets `dumbDutyFiltered` and `dumbCCTFiltered` to -1 sentinel; called on NORMAL→DUMB switch
 - `prevDutyStep`, `prevCCTStep` initialised to -1 (sentinel for first-call)
 
 ## Known Issues / History
 
-- Boot CCT snap: persistent issue across multiple PRs. Root cause always traced to IIR filter or ADC noise at boot. Current fix: 16-sample averaging + syncPotsAfterBoot seeds from step index math.
+- Boot CCT snap: persistent issue across multiple PRs. Root cause traced to IIR seed mismatch — `syncPotsAfterBoot()` was seeding `dutyFiltered`/`cctFiltered` from step-index math, but the first `handlePots()` ADC read after the 1250 ms boot fade differed by >0.01 normalized (>41 counts, easily hit by cap charge drift + ADC noise). This triggered fast alpha (0.60), the filter jumped, and the Schmitt trigger fired → CCT/brightness snap on first frame. **Fixed:** `syncPotsAfterBoot()` now seeds IIR filters from a fresh 8-sample ADC average; first-frame delta ≈ 0 → always slow alpha → no snap.
+- DUMB mode filter lag: old implementation was a cascade double-filter — shared adaptive IIR (α=0.10/0.60) followed by a second fixed-α IIR (α=0.05) on the already-filtered output. Combined lag was severe. **Fixed:** DUMB IIR now operates on raw (pre-shared-IIR) ADC normalized values, with adaptive α=0.40 (moving, delta > 0.005) / α=0.10 (settled). Feels analog-snappy when moving, suppresses noise when settled.
 - DUMB min: pots are calibrated to reach 0 cleanly; snap zones should NOT be added.
 - Step oscillation: old `|x - N| > 0.05` hysteresis caused oscillation at boundaries. Replaced with Schmitt trigger (±0.15 dead-band).
 - DUMB display range: shows actual per-channel PWM duty (`max(warmDuty, coolDuty) * 100`), floored at 0.01%. This matches oscilloscope reading when CCT splits power across channels.
