@@ -1,3 +1,6 @@
+#ifndef BRIGHTNESS_TABLE_CPP
+#define BRIGHTNESS_TABLE_CPP
+
 #include "brightness_table.h"
 
 const float brightnessTable[BRIGHTNESS_STEPS] = {
@@ -13,3 +16,5 @@ const float brightnessTable[BRIGHTNESS_STEPS] = {
     0.7511, 0.7685, 0.7861, 0.8039, 0.8219, 0.8401, 0.8585, 0.8771, 0.8959, 0.9149,
     0.9341
 };
+
+#endif // BRIGHTNESS_TABLE_CPP

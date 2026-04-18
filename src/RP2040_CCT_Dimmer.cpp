@@ -1,3 +1,6 @@
+#ifndef RP2040_CCT_DIMMER_CPP
+#define RP2040_CCT_DIMMER_CPP
+
 #include <Arduino.h>
 #include "pins.h"
 #include "state.h"
@@ -161,3 +164,5 @@ void loop() {
   updateLEDLogic(now);      // gamma, min duty, fades, LED update delay
   updateDisplayLogic(now);  // text, bars, flashing, timeout
 }
+
+#endif // RP2040_CCT_DIMMER_CPP
