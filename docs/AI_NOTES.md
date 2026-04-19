@@ -20,9 +20,38 @@ Last updated: 2026-04-17
 - `CCT_MIN_RAW  = 15`, `CCT_MAX_RAW  = 4095`
 - **Note:** physical pots may not mechanically reach ADC=4095 at the clockwise stop. This can cause the measured center to fall below the electrical center (e.g., CCT pot centre reads ~4400K instead of 4600K). Endpoint snap zones in DUMB mode compensate for the duty pot extremes; CAL mode is the proper fix for CCT calibration offset.
 
-## Key Constants (state.cpp)
+## min_duty Calibration Procedure
 
-- `min_duty = 0.0453f` — lowest stable PWM duty per channel (linear, pre-gamma). Hardware-calibrated. Do NOT change.
+`min_duty` MUST be set by hardware measurement using the LED Driver Analyzer sketch (`RP2040_CCT_Dimmer-LED_DRIVER_ANALYZER/`). Do NOT guess or use a theoretical value.
+
+**Procedure:**
+1. Open `RP2040_CCT_Dimmer-LED_DRIVER_ANALYZER/RP2040_CCT_Dimmer-LED_DRIVER_ANALYZER.ino` in Arduino IDE. All supporting `.cpp`/`.h` files are in the same folder and compile automatically. Do NOT use PlatformIO for this sketch.
+2. Flash to device
+3. Ensure DUMB switch is OFF (linear mode — no gamma applied)
+4. Both channels start. Warm (W) is selected by default; both-button short press toggles channel
+5. Step DOWN from a high value using DOWN button (DISP) until the LED just extinguishes or flickers
+6. Step UP one count at a time (UP = MAIN button) until the LED is stable
+7. Record the `RAW` count shown on the OLED
+8. `min_duty = RAW / 4095.0f`
+9. Update `float min_duty` in `src/state.cpp`
+
+**OLED display layout:** `RAW:<count>  D:<float>` / `<duty%>  <ns>ns` / `RNG:<range>  LIN/GAM  W/C  POT/BTN`
+
+**Button map in analyzer:** MAIN = step up (+1/+10/+50 counts on tap/long/very-long), DISP = step down. Both buttons together: release <2s = cycle PWM range forward; release ≥2s = cycle backward. Keep PWM range at 4095 for calibration.
+
+**Channel selection:** CCT pot (right knob) selects channel live — left half = Warm (W), right half = Cool (C). No button combo needed.
+
+**Pot vs Button mode:** Display shows POT (duty pot is live) or BTN (duty pot frozen). First tap of either button permanently freezes the duty pot for that session; only reboot restores pot control. Use the pot for coarse positioning, then tap a button to lock it in and fine-tune.
+
+**Pot control:** Duty pot (left knob) acts as coarse control in POT mode. Moving the pot by >8 ADC counts overrides stepDuty immediately. Sketch seeds stepDuty from the pot at boot.
+
+**Known pitfall:** Buttons are TTP223 active-high touch sensors; sketch uses INPUT mode (no internal pull needed). INPUT_PULLUP holds the line permanently HIGH, freezing the loop — do not use INPUT_PULLUP.
+
+**Note:** At 25 kHz with range 4095, each RAW count = 40000ns/4095 ≈ 9.77 ns of on-time.
+
+
+
+- `min_duty = 0.000244f` — lowest stable PWM duty per channel (linear, pre-gamma). Hardware-calibrated on 2026-04-19. RAW:1 at RNG:4095, 25kHz. Scope-measured ~38ns actual pulse (hardware clock quantization rounds up from theoretical 9.77ns). Both channels identical. Do NOT change without re-running the LED Driver Analyzer procedure.
 - `effective_off_threshold = 0.0011f` — gamma-domain cutoff. LEDs output zero below this.
 - `gamma_val = 2.2f`
 - `soft_start_ms = 1250` — NORMAL boot fade duration
@@ -98,6 +127,10 @@ Last updated: 2026-04-17
 - `prevDutyStep`, `prevCCTStep` initialised to -1 (sentinel for first-call)
 
 ## Known Issues / History
+
+- DUMB mode gamma crushes min_duty: In DUMB mode, the generic gamma scale `B_perceptual / B_linear` was applied to channel duties even in the `B_linear <= min_duty` branch. At pot-minimum (B_linear = min_duty = 0.0453), scale = pow(0.0453, 2.2)/0.0453 ≈ 0.025, so physical duty = 0.0453 × 0.025 ≈ 0.00114 — far below the hardware minimum stable duty. This caused: (a) lights brighter/more unstable than expected at minimum (0.00114% duty is below stable threshold), (b) standby fade from min_duty imperceptible (almost nothing to fade from 0.00114 to 0), (c) boot fade appeared to jump on because the sub-min_duty linear region produced near-zero physical output throughout. **Fixed:** DUMB section in `applyLEDsImmediate` now computes physical channel duty directly and returns early (bypassing the generic gamma scale). For B_linear ≤ min_duty (fade region only): `duty = min_duty × (B_linear / min_duty)` — linear from 0 to min_duty, giving a visible smooth fade. For B_linear > min_duty: `norm = (B_linear - min_duty) / (1 - min_duty)`, `B_phys = min_duty + pow(norm, gamma_val) × (1 - min_duty)` — gamma applied to the normalised range above min_duty. Result: pot-minimum → physical duty = min_duty (hardware minimum, stable & dim), pot-maximum → 1.0. Standby fade from min_duty now produces a visible linear ramp from 0.0453 → 0.
+
+
 
 - Pre-startup LED flash: LEDs sometimes flash briefly at power-on before the boot fade. This is a hardware glitch — PWM hardware may briefly output a non-zero value during the time between power-on and `initPins()`/`initPWM()`. **Mitigated:** `setup()` now drives `WARM_PIN` and `COOL_PIN` LOW as the very first lines (before `Serial.begin`, `initPins`, `initPWM`) using `pinMode` + `digitalWrite`. This sets the GPIO output low before PWM hardware takes over, minimising the flash window.
 - Boot CCT snap: persistent issue across multiple PRs. **Definitive root cause:** Cold-start ADC input capacitor charging causes the CCT ADC read taken immediately after power-on to underread by ~89 counts (~1 step, e.g. 4500K instead of 4600K). **Fix:** DUTY ADC is read first (doesn't need settling), then `buzzerStartupBeep()` fires (blocking ~200–400ms — free settling time), then CCT ADC is read post-beep. This settled post-beep read matches the value `syncPotsAfterBoot()` takes at fade-end, so `startCCT` equals the true pot position → no step mismatch → no Schmitt trigger snap. In addition, `syncPotsAfterBoot()` seeds `cctFiltered`/`prevCCTStep` from a fresh 8-sample ADC read (not from the boot CCT parameter), and `ledmix_initCurrent()` + `applyLEDsImmediate()` are called immediately after in `ledmix.cpp` to render at the corrected CCT in the same frame. **If boot CCT snap persists after this fix**, the root cause is a hardware ADC transient at power-on that software cannot fully compensate; this is cosmetic only (CCT shifts by 100K at end of startup fade if pot is between steps) and can be accepted until CAL mode is implemented.

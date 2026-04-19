@@ -90,36 +90,60 @@ void applyLEDsImmediate(float brightness, float cct)
     float dutyCool_lin = 0.0f;
 
     // ============================================================
-    // DUMB MODE — raw analog behavior
+    // DUMB MODE
+    // Gamma is applied only to the normalised range *above* min_duty so that:
+    //   pot-minimum  → physical channel duty = min_duty  (hardware minimum, dim but stable)
+    //   pot-maximum  → physical channel duty = 1.0
+    // This prevents the generic gamma scale below from crushing the output to
+    // pow(min_duty, 2.2) ≈ 0.00114 at pot-minimum, which is below the stable
+    // operating threshold and makes the standby fade imperceptible.
     // ============================================================
     if (currentMode == MODE_DUMB)
     {
         float mix = t;
+        float dutyWarm_out, dutyCool_out;
 
         if (B_linear <= min_duty) {
+            // Linear fade region — only traversed during fades (boot, standby).
+            // Scale channel duties proportionally so the fade from 0 → min_duty
+            // produces a visible, smooth ramp from off to the hardware minimum.
+            float s = (min_duty > 0.0f) ? (B_linear / min_duty) : 0.0f;
             if (mix == 0.0f) {
-                dutyWarm_lin = min_duty;
-                dutyCool_lin = 0.0f;
+                dutyWarm_out = min_duty * s;
+                dutyCool_out = 0.0f;
             } else if (mix == 1.0f) {
-                dutyWarm_lin = 0.0f;
-                dutyCool_lin = min_duty;
+                dutyWarm_out = 0.0f;
+                dutyCool_out = min_duty * s;
             } else {
-                dutyWarm_lin = min_duty;
-                dutyCool_lin = min_duty;
+                dutyWarm_out = min_duty * s;
+                dutyCool_out = min_duty * s;
             }
         } else {
+            // Normal operating range: apply gamma to the normalised portion
+            // above min_duty. B_phys maps [min_duty, 1.0] → [min_duty, 1.0]
+            // with a gamma curve in between.
+            float norm   = (B_linear - min_duty) / (1.0f - min_duty); // 0→1
+            float norm_g = useGamma ? powf(norm, gamma_val) : norm;
+            float B_phys = min_duty + norm_g * (1.0f - min_duty);     // min_duty→1.0
+
             if (mix == 0.0f) {
-                dutyWarm_lin = B_linear;
-                dutyCool_lin = 0.0f;
+                dutyWarm_out = B_phys;
+                dutyCool_out = 0.0f;
             } else if (mix == 1.0f) {
-                dutyWarm_lin = 0.0f;
-                dutyCool_lin = B_linear;
+                dutyWarm_out = 0.0f;
+                dutyCool_out = B_phys;
             } else {
-                float extra = B_linear - min_duty;
-                dutyWarm_lin = min_duty + extra * (1.0f - mix);
-                dutyCool_lin = min_duty + extra * mix;
+                float extra  = B_phys - min_duty;
+                dutyWarm_out = min_duty + extra * (1.0f - mix);
+                dutyCool_out = min_duty + extra * mix;
             }
         }
+
+        lastWarmDuty = dutyWarm_out;
+        lastCoolDuty = dutyCool_out;
+        setWarmDuty(dutyWarm_out);
+        setCoolDuty(dutyCool_out);
+        return;
     }
 
     // ============================================================

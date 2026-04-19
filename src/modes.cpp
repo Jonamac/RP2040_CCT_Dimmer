@@ -264,6 +264,11 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
 
             ledmix_set(newB, newC);
 
+            // Re-seed pot filter from current pot position so the first handlePots()
+            // call after STANDBY exit sees delta ≈ 0 and the Schmitt trigger stays
+            // quiet — prevents the burst of buzzer clicks when pots moved in STANDBY.
+            syncPotsAfterBoot(newB, newC);
+
             // Start NORMAL fade UP from min_duty (or 0 if target is below min_duty)
             normalFadeActive    = true;
             normalFadeStartB    = constrain(min_duty, 0.0f, newB);
@@ -348,6 +353,11 @@ void handleMainButtonRelease(unsigned long heldMs, unsigned long now) {
         float newC = 2700.0f + stepIndex * 100.0f;
 
         ledmix_set(newB, newC);
+
+        // Re-seed pot filter from current pot position so the first handlePots()
+        // call after STANDBY exit sees delta ≈ 0 and the Schmitt trigger stays
+        // quiet — prevents the burst of buzzer clicks when pots moved in STANDBY.
+        syncPotsAfterBoot(newB, newC);
 
         normalFadeActive    = true;
         normalFadeStartB    = constrain(min_duty, 0.0f, newB);

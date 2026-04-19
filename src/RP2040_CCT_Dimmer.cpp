@@ -82,11 +82,15 @@ void setup() {
         ledmix_initCurrent();
 
         // Start async DUMB boot fade
+        // Use a fresh millis() here — `now` was captured before delay(500) and
+        // ADC reads, so it is already ~500 ms stale. Using `now` would make
+        // elapsed ≥ dumb_soft_start_ms on the very first loop() tick, causing
+        // the fade to complete instantly with no visible soft-start.
         dumbFadeActive    = true;
         dumbFadeDirection = true;
         dumbFadeStartB    = 0.0f;
         dumbFadeEndB      = endB;
-        dumbFadeStartTime = now;
+        dumbFadeStartTime = millis();
         dumbFadeDuration  = dumb_soft_start_ms;
         bootFadeActive    = true;
 
