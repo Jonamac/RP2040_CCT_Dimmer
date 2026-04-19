@@ -11,7 +11,7 @@ bool demoJustResumed = false;
 // min_duty: lowest stable linear PWM duty (pre-gamma)
 // effective_off_threshold: threshold in gamma domain
 // gamma_val: perceptual correction exponent
-float min_duty = 0.0453f;              // per-channel minimum duty (linear)
+float min_duty = 0.000244f;            // per-channel minimum duty (linear) = RAW:1/4095, ~38ns @ 25kHz
 float effective_off_threshold = 0.0011f; // perceptual cutoff (gamma domain)
 float effective_off_threshold_linear = 0.0010f; // Linear cutoff for OVERRIDE modes
 
