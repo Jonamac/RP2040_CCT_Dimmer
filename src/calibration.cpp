@@ -54,25 +54,25 @@ const float normalBrightnessSteps[NORMAL_STEPS] = {
 
 // Cosmetic display percentages for NORMAL mode OLED — display-only, not PWM values.
 // Appear as visually equal steps so the knob feels uniform.
-// Formula: step 0 = 0.01% (mDUTY); steps 1-21 = round(i * 100.0 / 21.0) %
+// Step 0 = 0.01% (mDUTY); steps 1-21 = 1%, 5%, 10%, 15%...95%, 100%
 const float normalDisplayPercent[NORMAL_STEPS] = {
    0.01f,  // step  0 — min_duty (mDUTY label shown alongside)
-   5.00f,  // step  1
-  10.00f,  // step  2
-  14.00f,  // step  3
-  19.00f,  // step  4
-  24.00f,  // step  5
-  29.00f,  // step  6
-  33.00f,  // step  7
-  38.00f,  // step  8
-  43.00f,  // step  9
-  48.00f,  // step 10
-  52.00f,  // step 11 — 12 o'clock
-  57.00f,  // step 12
-  62.00f,  // step 13
-  67.00f,  // step 14
-  71.00f,  // step 15
-  76.00f,  // step 16
+   1.00f,  // step  1
+   5.00f,  // step  2
+  10.00f,  // step  3
+  15.00f,  // step  4
+  20.00f,  // step  5
+  25.00f,  // step  6
+  30.00f,  // step  7
+  35.00f,  // step  8
+  40.00f,  // step  9
+  45.00f,  // step 10
+  50.00f,  // step 11 — 12 o'clock
+  55.00f,  // step 12
+  60.00f,  // step 13
+  65.00f,  // step 14
+  70.00f,  // step 15
+  75.00f,  // step 16
   81.00f,  // step 17
   86.00f,  // step 18
   90.00f,  // step 19

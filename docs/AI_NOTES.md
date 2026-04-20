@@ -67,7 +67,7 @@ Last updated: 2026-04-17
 - Step 0 = `min_duty` (0.000244f): pot fully down → hardware minimum, OLED `0.01%` + `mDUTY` label
 - Step 11 ≈ 0.2408: perceptually 50% (12 o'clock); OLED shows `52%` (cosmetic)
 - Step 21 = 1.0: full brightness; OLED shows `100%`
-- OLED uses `normalDisplayPercent[]` cosmetic table: step 0 = 0.01%, steps 1–21 = 5%,10%,14%,19%,24%,29%,33%,38%,43%,48%,52%,57%,62%,67%,71%,76%,81%,86%,90%,95%,100% (indexed by `pots_getNormalDutyStep()`)
+- OLED uses `normalDisplayPercent[]` cosmetic table: step 0 = 0.01%, steps 1–21 = 1%,5%,10%,15%,20%,25%,30%,35%,40%,45%,50%,55%,60%,65%,70%,75%,80%,85%,90%,95%,100% (indexed by `pots_getNormalDutyStep()`)
 - NORMAL mixing floor: when `B_linear ≤ min_duty` both active channels scale 0→min_duty (mirrors DUMB fade-region). Prevents step 0 from being silenced by the old `reserved = 2*min_duty` logic.
 - CCT: 39 steps, 2700K–6500K, 100K per step
 - Pot changes use Schmitt trigger hysteresis (±0.20 step dead-band per boundary) to prevent oscillation
@@ -80,14 +80,15 @@ Last updated: 2026-04-17
 
 - Brightness: continuous, `min_duty + dutyNorm * (1 - min_duty)`, applied immediately
 - CCT: continuous 2700K–6500K, applied immediately
-- Gamma IS applied in DUMB (`applyLEDsImmediate` includes `MODE_DUMB` in `useGamma`); dedicated adaptive IIR filter (α=0.05 settled / α=0.40 moving, threshold 0.005, applied to RAW ADC normalized values) + dead-band (0.005 brightness, 10K CCT)
+- Gamma IS applied in DUMB (`applyLEDsImmediate` includes `MODE_DUMB` in `useGamma`); dedicated adaptive IIR filter (α=0.05 settled / α=0.40 moving, **moving threshold = 0.015** (~61 ADC counts, 3× RP2040 noise floor to prevent fast-alpha triggering from noise), applied to RAW ADC normalized values) + dead-band (0.005 brightness, 10K CCT)
+- Brightness and CCT updates are **independent**: CCT crossing its dead-band does NOT update `currentBrightness`. This prevents a CCT pot movement from smuggling a noisy duty value past the brightness dead-band and causing display jitter.
 - No buzzer clicks or beeps in DUMB (except `buzzerStartupBeep` at NORMAL boot, which ignores flags)
 - DUMB display: pot-normalized duty — `(rawB - min_duty) / (1 - min_duty) * 100`, floored at 0.01%. Shows 0.01% at pot-minimum, 100% at pot-maximum. `rawB = ledmix_getBrightness()` equals `min_duty` exactly when `dumbDutyFiltered` snaps to 0.
 - mDUTY indicator in DUMB: shown when `ledmix_getBrightness()` is within ±0.001 of `min_duty` (i.e., pot is at minimum). In NORMAL/DEMO/etc: shown when `currentWarmDuty == min_duty || currentCoolDuty == min_duty`.
 - DUMB CCT display: 10K resolution (rounded to nearest 10K) for continuous movement feel; NORMAL mode uses 100K resolution
 - DUMB duty endpoint snap zones: `dumbDutyFiltered < 0.015` → clamp to 0; `dumbDutyFiltered > 0.985` → clamp to 1. Ensures pots that don't reach full ADC range can still hit 0% and 100%. (was 0.03/0.97 — too wide at low end, reduced fine control)
 - DUMB CCT endpoint snap zones: `dumbCCTFiltered < 0.01` → clamp to 0.0 (2700K); `dumbCCTFiltered > 0.99` → clamp to 1.0 (6500K). Without these, `dumbCCTFiltered` approaches 0/1 asymptotically and `mix` in `applyLEDsImmediate` never equals exactly 0.0f or 1.0f. The `mix==0.0f` (warm=min_duty, cool=off) and `mix==1.0f` (cool=min_duty, warm=off) branches are ONLY reachable with these snap zones.
-- DUMB CCT center snap zone: if computed CCT is within ±75K of 4600K, snap to 4600K exactly. Makes neutral/center position easy to find and hold.
+- DUMB CCT center snap zone: if computed CCT is within ±50K of 4600K (i.e. >4550K and <4650K), snap to 4600K exactly.
 - DUMB maximum: constrain `newB` to `[min_duty, 1.0]`
 - DUMB STANDBY uses `dumbFadeActive` engine
 

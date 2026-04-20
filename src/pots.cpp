@@ -26,12 +26,13 @@ float lastCCTNorm  = 0.0f;
 
 static const float DUTY_STEP_HYST_ST    = 0.20f;  // Schmitt dead-band per side (duty)
 static const float CCT_STEP_HYST_ST     = 0.20f;  // Schmitt dead-band per side (CCT)
-static const float DUMB_BRIGHTNESS_DB  = 0.005f;  // wider dead-band to suppress ADC noise
-static const float DUMB_CCT_DB         = 10.0f;   // 10 K CCT dead-band to suppress ADC noise
+static const float DUMB_BRIGHTNESS_DB  = 0.005f;  // 0.5% brightness dead-band for ADC noise
+static const float DUMB_CCT_DB         = 10.0f;   // 10 K CCT dead-band for ADC noise
+static const float DUMB_IIR_MOVE_THOLD = 0.015f;  // IIR fast-alpha threshold (~61 ADC counts, safely above RP2040 noise floor)
 static const float DUMB_DUTY_SNAP_LO   = 0.015f;  // endpoint snap: below this → clamp to 0
 static const float DUMB_DUTY_SNAP_HI   = 0.985f;  // endpoint snap: above this → clamp to 1
 static const float DUMB_CCT_CENTER_K   = 4600.0f; // center snap target (neutral CCT)
-static const float DUMB_CCT_CENTER_TOL = 75.0f;   // ±K around center that snaps to center
+static const float DUMB_CCT_CENTER_TOL = 50.0f;   // ±K: snaps to center between 4550K and 4650K
 
 // IIR filter state — file-scope so syncPotsAfterBoot() can seed them
 static float dutyFiltered = -1.0f;
@@ -96,16 +97,17 @@ void handlePots(unsigned long now)
         if (dumbFadeActive) return;
 
         // Single adaptive IIR for DUMB mode, applied to raw (pre-shared-IIR) ADC values.
-        // α=0.40 when moving (delta > 0.005, ~20 ADC counts) → ~2.5-frame lag, analog-feel.
-        // α=0.05 when settled → ~20-frame smoothing, suppresses ADC noise.
+        // α=0.40 when moving (delta > DUMB_IIR_MOVE_THOLD, ~61 ADC counts) → snappy response.
+        // α=0.05 when settled → ~20-frame smoothing suppresses ADC noise.
+        // Threshold is 3× the RP2040 ADC noise floor to prevent fast-alpha triggering from noise.
         if (dumbDutyFiltered < 0.0f) {
             dumbDutyFiltered = rawDutyNorm;
             dumbCCTFiltered  = rawCCTNorm;
         } else {
             float dDutyDelta = fabsf(rawDutyNorm - dumbDutyFiltered);
             float dCCTDelta  = fabsf(rawCCTNorm  - dumbCCTFiltered);
-            float dDutyAlpha = (dDutyDelta > 0.005f) ? 0.40f : 0.05f;   // was 0.10 settled
-            float dCCTAlpha  = (dCCTDelta  > 0.005f) ? 0.40f : 0.05f;   // was 0.10 settled
+            float dDutyAlpha = (dDutyDelta > DUMB_IIR_MOVE_THOLD) ? 0.40f : 0.05f;
+            float dCCTAlpha  = (dCCTDelta  > DUMB_IIR_MOVE_THOLD) ? 0.40f : 0.05f;
             dumbDutyFiltered = dumbDutyFiltered * (1.0f - dDutyAlpha) + rawDutyNorm * dDutyAlpha;
             dumbCCTFiltered  = dumbCCTFiltered  * (1.0f - dCCTAlpha)  + rawCCTNorm  * dCCTAlpha;
         }
@@ -119,8 +121,7 @@ void handlePots(unsigned long now)
         float newB = min_duty + dumbDutyFiltered * (1.0f - min_duty);
         float newC = 2700.0f + dumbCCTFiltered  * (6500.0f - 2700.0f);
 
-        // Soft center snap: within ±DUMB_CCT_CENTER_TOL of neutral CCT snaps to center exactly.
-        // Makes it easy to find and hold neutral CCT without being too restrictive.
+        // Soft center snap: within ±50K of neutral CCT snaps to center exactly.
         if (fabsf(newC - DUMB_CCT_CENTER_K) < DUMB_CCT_CENTER_TOL) newC = DUMB_CCT_CENTER_K;
 
         // Clamp to valid range
@@ -134,12 +135,18 @@ void handlePots(unsigned long now)
         bool brightnessChanged = (prevDumbB < 0.0f) || (fabsf(newB - prevDumbB) > DUMB_BRIGHTNESS_DB);
         bool cctChanged        = (prevDumbC < 0.0f) || (fabsf(newC - prevDumbC) > DUMB_CCT_DB);
 
-        if (brightnessChanged || cctChanged) {
+        // Update brightness and CCT independently so a CCT change cannot smuggle
+        // a noisy duty value past the brightness dead-band (and vice versa).
+        // Only the changed quantity gets committed; the other keeps its last stable value.
+        if (brightnessChanged) {
             currentBrightness = newB;
-            currentCCT        = newC;
             prevDumbB         = newB;
-            prevDumbC         = newC;
-
+        }
+        if (cctChanged) {
+            currentCCT = newC;
+            prevDumbC  = newC;
+        }
+        if (brightnessChanged || cctChanged) {
             ledmix_set(currentBrightness, currentCCT);
             applyLEDsImmediate(currentBrightness, currentCCT);
         }
