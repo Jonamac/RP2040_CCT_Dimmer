@@ -13,4 +13,8 @@ void syncPotsAfterBoot(float brightness, float cct);
 // Call when entering DUMB mode to force a fresh filter seed on next handlePots().
 void resetDumbFilter();
 
+// Returns the current NORMAL mode duty step index (0–NORMAL_STEPS-1).
+// Used by displayui.cpp to look up the cosmetic display percentage.
+int pots_getNormalDutyStep();
+
 #endif // POTS_H

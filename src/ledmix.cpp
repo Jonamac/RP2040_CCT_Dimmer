@@ -64,20 +64,15 @@ void applyLEDsImmediate(float brightness, float cct)
     }
     if (brightness > 1.0f) brightness = 1.0f;
 
-    bool useGamma =
-        !(currentMode == MODE_FREQ || currentMode == MODE_CAL);
+    // DUMB mode applies its own internal gamma (norm_g path) and returns early.
+    // All other modes (NORMAL, STANDBY, DEMO, FREQ, CAL) use pre-gamma table values
+    // or raw duty cycles — no additional gamma correction applied.
+    // effective_off_threshold is retired: min_duty is the hardware-calibrated floor;
+    // sub-min_duty values during fades quantize to RAW:0 via setWarmDuty/setCoolDuty.
+    bool useGamma = (currentMode == MODE_DUMB);
 
     float B_linear     = brightness;
     float B_perceptual = useGamma ? applyGamma(B_linear) : B_linear;
-
-    // Effective-off threshold (not in DUMB mode)
-    if (currentMode != MODE_DUMB) {
-        if (B_perceptual < effective_off_threshold) {
-            setWarmDuty(0.0f);
-            setCoolDuty(0.0f);
-            return;
-        }
-    }
 
     // CCT mix
     float t = (cct - 2700.0f) / (6500.0f - 2700.0f);
@@ -163,9 +158,13 @@ void applyLEDsImmediate(float brightness, float cct)
             dutyWarm_lin = (wWarm > 0) ? (min_duty + Brem * wWarmN) : 0;
             dutyCool_lin = (wCool > 0) ? (min_duty + Brem * wCoolN) : 0;
         } else {
-            float scale = (reserved > 0) ? B_linear / reserved : 0;
-            dutyWarm_lin = (wWarm > 0) ? min_duty * scale : 0;
-            dutyCool_lin = (wCool > 0) ? min_duty * scale : 0;
+            // B_linear < combined channel floor (traversed during fades only, and at step 0).
+            // Mirror DUMB fade-region behavior: scale both active channels from 0 → min_duty.
+            // At step 0 (B_linear = min_duty, both active), s = 1.0 → each channel = min_duty.
+            // During standby fade-to-zero, s ramps from 1.0 → 0 smoothly.
+            float s = (min_duty > 0.0f) ? (B_linear / min_duty) : 0.0f;
+            dutyWarm_lin = (wWarm > 0) ? min_duty * s : 0.0f;
+            dutyCool_lin = (wCool > 0) ? min_duty * s : 0.0f;
         }
     }
 

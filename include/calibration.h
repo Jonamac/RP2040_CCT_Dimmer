@@ -13,4 +13,7 @@ extern const int CCT_MAX_RAW;
 extern const int NORMAL_STEPS;
 extern const float normalBrightnessSteps[];
 
+// Cosmetic display percentages for NORMAL mode OLED — display-only, not PWM values.
+extern const float normalDisplayPercent[];
+
 #endif // CALIBRATION_H

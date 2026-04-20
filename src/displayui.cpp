@@ -5,6 +5,8 @@
 #include "state.h"
 #include "pwm_control.h"
 #include "ledmix.h"
+#include "calibration.h"
+#include "pots.h"
 #include <Adafruit_SSD1306.h>
 #include <Wire.h>
 
@@ -87,8 +89,13 @@ static void drawMainUI(const char* modeLabel, bool showStandby) {
         float range = 1.0f - min_duty;
         float norm = (range > 0.0f) ? constrain((rawB - min_duty) / range, 0.0f, 1.0f) : 0.0f;
         displayDutyPercent = max(norm * 100.0f, 0.01f);
+    } else if (currentMode == MODE_NORMAL) {
+        // Cosmetic equal-step display: look up step index in normalDisplayPercent[].
+        // Values are display-only (0.00%=off, 0.01%=minimum, 5%–100% in 5% steps).
+        int step = constrain(pots_getNormalDutyStep(), 0, NORMAL_STEPS - 1);
+        displayDutyPercent = normalDisplayPercent[step];
     } else {
-        // NORMAL / STANDBY(from NORMAL) / DEMO / FREQ / etc: raw brightness * 100
+        // STANDBY(from NORMAL) / DEMO / FREQ / CAL: raw brightness * 100
         displayDutyPercent = ledmix_getBrightness() * 100.0f;
     }
     display.print(displayDutyPercent, 2);

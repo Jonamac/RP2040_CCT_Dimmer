@@ -216,6 +216,11 @@ void handlePots(unsigned long now)
     ledmix_set(currentBrightness, currentCCT);
 }
 
+int pots_getNormalDutyStep()
+{
+    return prevDutyStep;
+}
+
 void syncPotsAfterBoot(float brightness, float cct)
 {
     // Take a fresh ADC read. The boot-time ADC (taken at cold start) can differ

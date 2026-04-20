@@ -52,7 +52,7 @@ Last updated: 2026-04-17
 
 
 - `min_duty = 0.000244f` — lowest stable PWM duty per channel (linear, pre-gamma). Hardware-calibrated on 2026-04-19. RAW:1 at RNG:4095, 25kHz. Scope-measured ~38ns actual pulse (hardware clock quantization rounds up from theoretical 9.77ns). Both channels identical. Do NOT change without re-running the LED Driver Analyzer procedure.
-- `effective_off_threshold = 0.0011f` — gamma-domain cutoff. LEDs output zero below this.
+- `effective_off_threshold = 0.0011f` — **RETIRED**. Was a gamma-domain software guard; now obsolete since `min_duty` is hardware-calibrated. Sub-min_duty values quantize to RAW:0 via `setWarmDuty/setCoolDuty` automatically. Variable kept in state.cpp/state.h but not used by `applyLEDsImmediate`.
 - `gamma_val = 2.2f`
 - `soft_start_ms = 1250` — NORMAL boot fade duration
 - `dumb_soft_start_ms = 500` — DUMB boot fade duration
@@ -61,7 +61,14 @@ Last updated: 2026-04-17
 
 ## NORMAL Mode
 
-- Brightness: stepped via `normalBrightnessSteps[]` table (`NORMAL_STEPS` entries, defined in `calibration.cpp`)
+- **PERMANENT RULE — NORMAL Step 0 = min_duty, NOT 0.0f.** STANDBY handles off. Step 0 is the hardware minimum (LEDs dimly on, mDUTY label). Do NOT set step 0 to 0.0f — this has been confirmed multiple times.
+- Brightness: stepped via `normalBrightnessSteps[]` table (`NORMAL_STEPS` = 22 entries, defined in `calibration.cpp`)
+- Table is pre-gamma raw PWM duties. Formula: `steps[i] = min_duty + pow(i/21.0, 2.2) * (1 - min_duty)`. `applyLEDsImmediate()` does NOT apply gamma for NORMAL.
+- Step 0 = `min_duty` (0.000244f): pot fully down → hardware minimum, OLED `0.01%` + `mDUTY` label
+- Step 11 ≈ 0.2408: perceptually 50% (12 o'clock); OLED shows `52%` (cosmetic)
+- Step 21 = 1.0: full brightness; OLED shows `100%`
+- OLED uses `normalDisplayPercent[]` cosmetic table: step 0 = 0.01%, steps 1–21 = 5%,10%,14%,19%,24%,29%,33%,38%,43%,48%,52%,57%,62%,67%,71%,76%,81%,86%,90%,95%,100% (indexed by `pots_getNormalDutyStep()`)
+- NORMAL mixing floor: when `B_linear ≤ min_duty` both active channels scale 0→min_duty (mirrors DUMB fade-region). Prevents step 0 from being silenced by the old `reserved = 2*min_duty` logic.
 - CCT: 39 steps, 2700K–6500K, 100K per step
 - Pot changes use Schmitt trigger hysteresis (±0.20 step dead-band per boundary) to prevent oscillation
 - IIR filter α=0.10 (settled) / α=0.60 (moving, delta > 0.025) on raw ADC before step logic
@@ -198,7 +205,7 @@ Last updated: 2026-04-17
 | Boot CCT snap | CCT snaps 100K at end of startup fade | ⚠️ Parked | Persists after 8+ fix attempts; cosmetic; revisit in CAL mode era |
 | PR 4 | handleDumbToggle() Extraction (bug 14) | ✅ Done | |
 | PR 5 | Display Fixes: DUTY%, mDUTY (bugs 12, 13) | 📋 Planned | Some fixes already applied via hotfixes; verify/complete |
-| PR 6 | Brightness Table Rebuild (bug 11) | 📋 Planned | normalBrightnessSteps[0] should be min_duty; piecewise linear |
+| PR 6 | Brightness Table Rebuild (bug 11) | ✅ Done | Step 0 = min_duty (PERMANENT — never 0.0f). Pre-gamma `steps[i]=min_duty+pow(i/21.0,2.2)*(1-min_duty)`. Cosmetic `normalDisplayPercent[]`. NORMAL mixing floor: B≤min_duty → both channels scale 0→min_duty (mirrors DUMB fade-region). DUMB→NORMAL fade startB fixed to `currentWarmDuty+currentCoolDuty` (physical output, not pre-gamma). Buzzer flags cleared in STANDBY dumb-switch path; DISP toggle silent from DUMB STANDBY. |
 | PR 7 | Buzzer Fixes + Code Cleanup (bugs 9, 10, 15, 16, 17) | 📋 Planned | |
 
 ### PR 4 Detail — handleDumbToggle() Extraction

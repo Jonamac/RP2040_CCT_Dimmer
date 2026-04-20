@@ -9,6 +9,7 @@
 #include "inputs.h"
 #include "display_ui.h"
 #include "ledmix.h"
+#include "pwm_control.h"
 #include "pins.h"
 #include "freq_mode.h"
 
@@ -73,8 +74,15 @@ void handleDumbSwitch(unsigned long now) {
         // the switch was flipped while in STANDBY.
         if (dumbSwitch && previousMode != MODE_DUMB) {
             previousMode = MODE_DUMB;
+            // Silence buzzer — DUMB mode transitions are always silent.
+            // Restored when switching back toward NORMAL (see else-if below).
+            buzzer_beep_enabled  = false;
+            buzzer_click_enabled = false;
         } else if (!dumbSwitch && previousMode == MODE_DUMB) {
             previousMode = MODE_NORMAL;
+            // Re-enable buzzer when switching back to NORMAL side while in STANDBY.
+            buzzer_beep_enabled  = true;
+            buzzer_click_enabled = true;
         }
         lastDumbSwitch = dumbSwitch;
         return;
@@ -84,6 +92,12 @@ void handleDumbSwitch(unsigned long now) {
     if (dumbSwitch && !lastDumbSwitch) {
         currentMode = MODE_DUMB;
         normalFadeActive = false;  // Cancel any in-progress NORMAL fade
+
+        // Silence buzzer when entering DUMB — all DUMB transitions are silent.
+        // Restored when switching back to NORMAL in the SWITCH TURNED OFF path.
+        buzzer_beep_enabled  = false;
+        buzzer_click_enabled = false;
+
         resetDumbFilter();
         lastDutyNorm = -1.0f; // force pot resync
 
@@ -133,8 +147,13 @@ void handleDumbSwitch(unsigned long now) {
             // Seed pot filter immediately to prevent post-transition snap on next handlePots()
             syncPotsAfterBoot(newB, newC);
 
-            // Fade from current brightness to NORMAL step target (quick transition)
-            float startB = constrain(ledmix_getBrightness(), 0.0f, 1.0f);
+            // Use the actual physical output as the NORMAL-equivalent fade start.
+            // In DUMB, led_currentBrightness holds the pre-gamma linear value (e.g. 0.5
+            // for pots at center). NORMAL treats table values as raw duties with no gamma,
+            // so using 0.5 as startB would produce 50% raw duty on frame 1 — much brighter
+            // than the DUMB gamma-corrected output (~22%). currentWarmDuty + currentCoolDuty
+            // equals B_linear in the NORMAL mixing path, giving a seamless handoff.
+            float startB = constrain(currentWarmDuty + currentCoolDuty, 0.0f, 1.0f);
             normalFadeActive    = true;
             normalFadeStartB    = startB;
             normalFadeEndB      = newB;
@@ -171,10 +190,7 @@ void handleDumbToggle(unsigned long now) {
 
         ledmix_set(linearBrightness, ledmix_getCCT());
 
-        if (systemInitialized) {
-            buzzerModeChangeBeep();
-            buzzerQuietUntil = millis() + 200;
-        }
+        // DUMB mode transitions are always silent — no buzzer
         return;
     }
 
@@ -472,7 +488,8 @@ void handleDispButtonRelease(unsigned long heldMs) {
         } else {
             displayOn = !displayOn;
             if (displayOn) lastDisplayOnTime = millis();
-            if (systemInitialized) {
+            // DUMB STANDBY display toggle is always silent
+            if (systemInitialized && !(currentMode == MODE_STANDBY && previousMode == MODE_DUMB)) {
                 buzzerModeChangeBeep();
                 buzzerQuietUntil = millis() + 200;
             }
